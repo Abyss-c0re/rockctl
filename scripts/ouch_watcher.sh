@@ -161,11 +161,27 @@ read_new() {
   return 0
 }
 
+# ALSA PCM: clanker_quiet ≈ 60% gain (~40% quieter). Override with OUCH_PCM.
+OUCH_PCM="${OUCH_PCM:-clanker_quiet}"
+
 play_ouch() {
   reason="$1"
   [ -x "$APLAY" ] || { log "no aplay"; return 1; }
   [ -s "$WAV" ] || { log "no wav $WAV"; return 1; }
-  log "HIT reason=$reason → OUCH"
+  log "HIT reason=$reason → OUCH pcm=$OUCH_PCM"
+  HOME="$ROOT" "$APLAY" -D "$OUCH_PCM" "$WAV" >/dev/null 2>&1 &
+  ap=$!
+  i=0
+  while [ "$i" -lt 4 ]; do
+    kill -0 "$ap" 2>/dev/null || break
+    i=$((i + 1))
+    sleep 0.1 2>/dev/null || true
+  done
+  if kill -0 "$ap" 2>/dev/null; then
+    echo $ap > /tmp/ouch_aplay.pid
+    return 0
+  fi
+  # fallbacks if quiet device missing
   HOME="$ROOT" "$APLAY" -D clanker "$WAV" >/dev/null 2>&1 &
   ap=$!
   i=0

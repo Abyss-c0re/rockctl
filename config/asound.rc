@@ -1,4 +1,4 @@
-# Clanker mix fragment — install as /root/.asoundrc (merged with system alsa.conf)
+# Clanker mix fragment — used as $HOME/.asoundrc (HOME=rockctl)
 pcm.clanker_dmix {
     type dmix
     ipc_key 424242
@@ -15,4 +15,11 @@ pcm.clanker_dmix {
 pcm.clanker {
     type plug
     slave.pcm "clanker_dmix"
+}
+# ~60% linear amplitude (~40% quieter) for music / ouch
+pcm.clanker_quiet {
+    type route
+    slave.pcm "clanker"
+    ttable.0.0 0.6
+    ttable.1.1 0.6
 }

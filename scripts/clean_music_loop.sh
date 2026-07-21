@@ -192,12 +192,16 @@ aplay_alive() {
   kill -0 "$ap" 2>/dev/null
 }
 
-# ALSA device: prefer software mix so OUCH/TTS can overlay.
-# Uses /mnt/data/rockctl/asound.conf pcm "clanker" (plug→dmix) when present.
+# ALSA device: prefer quiet mix (~60% gain / ~40% quieter) so OUCH/TTS overlay.
+# Override with CLEAN_MUSIC_PCM (e.g. clanker for full volume).
 music_aplay_dev() {
-  # $HOME/.asoundrc (HOME=$ROOT) defines pcm.clanker for dmix overlay
+  if [ -n "${CLEAN_MUSIC_PCM:-}" ]; then
+    echo "$CLEAN_MUSIC_PCM"
+    return
+  fi
+  # $HOME/.asoundrc (HOME=$ROOT) defines clanker_quiet → clanker → dmix
   if [ -f "$ROOT/.asoundrc" ] || [ -f "$ROOT/asound.rc" ]; then
-    echo clanker
+    echo clanker_quiet
     return
   fi
   echo hw:0,0
