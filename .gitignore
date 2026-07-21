@@ -1,0 +1,35 @@
+# build
+/build/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# secrets / device state (never commit)
+**/*peer_token*
+**/*session*
+**/*.key
+**/master.key
+**/device.token
+**/*.env
+!**/*.example
+!**/*.example.env
+config/device.env
+.env
+.env.*
+
+# editor / OS
+*~
+*.bak
+*.swp
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+
+# large / local media dumps
+sounds/*.wav
+!sounds/README.md
+**/rrlog/

@@ -1,0 +1,3073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>ClankerDash</title>
+<style>
+:root{color-scheme:dark;--bg:#0a0e12;--panel:#11181e;--fg:#e8eef2;--mut:#7a8a94;
+  --acc:#3ddc97;--cyan:#00e5ff;--warn:#ffb020;--bad:#ff6b6b;--line:#1c262c;--tab:#151c22}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+  font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+#app{display:flex;flex-direction:column;height:100%;max-width:48rem;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;gap:.5rem;
+  padding:.55rem .75rem;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:700}.brand span{color:var(--acc)}
+#pill{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--mut);
+  max-width:55%;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pill .ok{color:var(--acc)} #pill .bad{color:var(--bad)} #pill .warn{color:var(--warn)}
+nav.tabs{display:flex;border-bottom:1px solid var(--line);background:var(--tab);overflow-x:auto}
+nav.tabs button{flex:1;min-width:4rem;border:0;background:0;color:var(--mut);font:inherit;font-weight:600;
+  padding:.6rem .3rem;cursor:pointer;border-bottom:2px solid transparent}
+nav.tabs button.on{color:var(--acc);border-bottom-color:var(--acc)}
+main{flex:1;min-height:0;overflow:auto;padding:.65rem .75rem}
+.page{display:none}.page.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.8rem;margin:0 0 .6rem}
+.card h2{margin:0 0 .5rem;font-size:.7rem;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+.row{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+button,a.btn{appearance:none;border:1px solid var(--line);background:#1a2228;color:var(--fg);
+  border-radius:8px;padding:.5rem .75rem;font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+button.primary{background:var(--acc);color:#042116;border-color:transparent}
+button.cyan{background:var(--cyan);color:#00343a;border-color:transparent}
+button.on{outline:2px solid var(--acc);background:var(--acc);color:#042116;border-color:transparent}
+button.warn{border-color:var(--warn);color:var(--warn)}
+button.bad{border-color:var(--bad);color:var(--bad)}
+button:disabled{opacity:.5}
+.kv{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.kv div{margin:.12rem 0}.kv span{color:var(--mut)}
+.hint{font-size:11px;color:var(--mut);margin-top:.4rem}
+#mapwrap{position:relative;width:100%;max-width:100%;height:min(78vw,520px);
+  overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#7a7f86;
+  touch-action:none;user-select:none}
+#mapc{display:block;width:100%;height:100%;cursor:crosshair;image-rendering:pixelated}
+#mapc.dragging{cursor:grabbing}
+#map-tools{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.45rem;align-items:center}
+#map-actions{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.45rem;align-items:center;
+  padding:.5rem;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+#map-actions button:disabled{opacity:.4;cursor:not-allowed}
+#map-sel{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--mut);flex:1;min-width:10rem}
+#map-legend{display:flex;flex-wrap:wrap;gap:.6rem;font-size:11px;color:var(--mut);margin-top:.35rem}
+#map-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:.25rem;vertical-align:middle}
+#map-zoom-lbl{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--mut);min-width:3.5rem}
+#map-msg{font-size:12px;color:var(--mut);margin-top:.35rem;min-height:1.2em}
+#log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:14rem;overflow:auto;
+  white-space:pre-wrap;word-break:break-word;margin-top:.45rem}
+.u{color:var(--cyan)}.a{color:var(--fg)}.s{color:var(--mut)}.err{color:var(--bad)}
+#composer{display:flex;gap:.35rem;margin-top:.5rem}
+#q{flex:1;min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:.6rem .7rem;font:inherit}
+input[type=text],select{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:.5rem .6rem;font:inherit;margin:.25rem 0}
+label{font-size:12px;color:var(--mut);display:block}
+.foot{font-size:10px;color:var(--mut);margin-top:.75rem;line-height:1.35}
+.seg{display:flex;gap:.3rem;flex-wrap:wrap}
+/* Schedule tab */
+.sched-job{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;
+  padding:.65rem .7rem;margin:.4rem 0;border:1px solid var(--line);border-radius:10px;background:#0d1318}
+.sched-job.off{opacity:.55}
+.sched-job .sj-time{font-size:1.35rem;font-weight:700;font-variant-numeric:tabular-nums;min-width:4.2rem}
+.sched-job .sj-body{flex:1;min-width:10rem}
+.sched-job .sj-title{font-weight:600}
+.sched-job .sj-meta{font-size:12px;color:var(--mut);margin-top:.15rem}
+.sched-job .sj-acts{display:flex;flex-wrap:wrap;gap:.3rem}
+.daychips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.3rem 0}
+.daychips button{min-width:2.4rem;padding:.4rem .35rem;font-size:12px}
+.daychips button.on{outline:2px solid var(--acc);background:var(--acc);color:#042116;border-color:transparent}
+.preset-row{display:flex;flex-wrap:wrap;gap:.3rem;margin:.25rem 0 .45rem}
+.preset-row button{font-size:12px;padding:.35rem .55rem}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem .65rem}
+@media(max-width:420px){.form-grid{grid-template-columns:1fr}}
+.form-grid label{margin:0}
+.form-grid .full{grid-column:1/-1}
+input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:.5rem .6rem;font:inherit;margin:.25rem 0}
+.toggle-row{display:flex;align-items:center;gap:.5rem;margin:.4rem 0}
+.toggle-row input{width:auto;margin:0}
+.sched-empty{text-align:center;padding:1rem .5rem;color:var(--mut)}
+.sched-empty b{display:block;color:var(--fg);margin-bottom:.35rem;font-size:1rem}
+#sched-form-card.editing{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan)}
+/* Manual / remote control pad */
+#manual-status{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;margin:.35rem 0}
+#manual-status .on{color:var(--acc)} #manual-status .off{color:var(--mut)}
+.dpad{display:grid;grid-template-columns:repeat(3,4.6rem);grid-template-rows:repeat(3,4.6rem);
+  gap:.4rem;justify-content:center;margin:.55rem auto;width:max-content;touch-action:none;user-select:none}
+.dpad button{width:100%;height:100%;font-size:1.35rem;padding:0;line-height:1;
+  touch-action:none;-webkit-user-select:none;user-select:none}
+.dpad button:active,.dpad button.held{outline:2px solid var(--cyan);background:#163038}
+.dpad .gap{visibility:hidden;pointer-events:none}
+.speed-row{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;margin:.35rem 0}
+.speed-row button{font-size:12px;padding:.4rem .55rem}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand"><span>Clanker</span>Dash</div>
+    <div id="pill">…</div>
+  </header>
+  <nav class="tabs">
+    <button type="button" class="on" data-t="control">Control</button>
+    <button type="button" data-t="map">Map</button>
+    <button type="button" data-t="music">Music</button>
+    <button type="button" data-t="schedule">Schedule</button>
+    <button type="button" data-t="settings">Settings</button>
+    <button type="button" data-t="assist">Assistant</button>
+  </nav>
+  <main>
+    <section id="p-control" class="page on">
+      <div class="card">
+        <h2>Clean</h2>
+        <div class="row">
+          <button class="primary" data-act="start">Start clean</button>
+          <button data-act="pause">Pause</button>
+          <button class="bad" data-act="stop">Stop</button>
+          <button data-act="spot">Spot</button>
+          <button class="primary" data-act="home">Dock</button>
+          <button data-act="locate">Locate</button>
+        </div>
+      </div>
+      <div class="card" id="manual-card">
+        <h2>Manual drive</h2>
+        <div class="row">
+          <button type="button" class="cyan" id="manual-engage">Engage RC</button>
+          <button type="button" class="bad" id="manual-disengage">Disengage</button>
+          <button type="button" data-act="home">Dock</button>
+        </div>
+        <div id="manual-status"><span class="off">idle · not in manual mode</span></div>
+        <div class="speed-row">
+          <span class="hint" style="margin:0">Speed</span>
+          <button type="button" data-mspeed="slow">Slow</button>
+          <button type="button" class="on" data-mspeed="med">Med</button>
+          <button type="button" data-mspeed="fast">Fast</button>
+        </div>
+        <div class="dpad" id="manual-dpad" aria-label="Manual drive pad">
+          <span class="gap"></span>
+          <button type="button" data-mdir="forward" title="Forward (W)">▲</button>
+          <span class="gap"></span>
+          <button type="button" data-mdir="left" title="Left (A)">◀</button>
+          <button type="button" class="bad" data-mdir="halt" title="Stop (Space)">■</button>
+          <button type="button" data-mdir="right" title="Right (D)">▶</button>
+          <span class="gap"></span>
+          <button type="button" data-mdir="back" title="Back (S)">▼</button>
+          <span class="gap"></span>
+        </div>
+        <div class="hint">Remote control via miio <code>app_rc_*</code> — <b>no cleaning</b>, LDS for drive only. Engage first, hold pad (or WASD). Disengage or Dock when done. Robot may leave the dock when you move.</div>
+      </div>
+      <div class="card">
+        <h2>Fan (suction)</h2>
+        <div class="row">
+          <button data-fan="quiet">Quiet</button>
+          <button data-fan="balanced">Balanced</button>
+          <button data-fan="turbo">Turbo</button>
+          <button data-fan="max">Max</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Moist (mop water)</h2>
+        <div class="row">
+          <button data-water="off">Off / dry</button>
+          <button data-water="low">Low</button>
+          <button data-water="medium">Medium</button>
+          <button data-water="high">High</button>
+        </div>
+        <div class="hint">Mop moisture via rockctl <code>PUT /api/v1/water</code>.</div>
+      </div>
+      <div class="card">
+        <h2>Status</h2>
+        <div class="kv" id="status">…</div>
+        <div class="hint">Offline via rockctl/miio. Map tab: click to summon.</div>
+      </div>
+      <div class="card">
+        <h2>Robot resources <span style="font-weight:400;text-transform:none;letter-spacing:0">(tight · ~256 MB)</span></h2>
+        <div class="kv" id="res">…</div>
+        <div class="hint">Live from rockctl <code>/api/v1/resources</code>. nanobot runs lean (max 2 forks, 3 turns).</div>
+      </div>
+    </section>
+
+    <section id="p-map" class="page">
+      <div class="card">
+        <h2>Map view</h2>
+        <div id="mapwrap" style="min-height:280px">
+          <canvas id="mapc" width="427" height="322"></canvas>
+        </div>
+        <div id="map-actions">
+          <span id="map-sel">Tap free floor to place a target</span>
+          <button type="button" class="primary" id="map-summon" disabled>Summon</button>
+          <button type="button" class="cyan" id="map-spot" disabled>Spot clean</button>
+          <button type="button" id="map-save" disabled>Save place</button>
+          <button type="button" id="map-clear" disabled>Clear</button>
+          <button type="button" data-act="home">Dock</button>
+        </div>
+        <div id="map-tools">
+          <button type="button" id="map-zin" title="Zoom in">＋</button>
+          <button type="button" id="map-zout" title="Zoom out">－</button>
+          <button type="button" id="map-zreset" title="Fit map">Fit</button>
+          <button type="button" id="map-center-dock" title="Center on dock">Dock</button>
+          <button type="button" id="map-center-robot" title="Center on robot estimate">Robot</button>
+          <button type="button" id="map-follow" title="Keep view centered on robot while moving">Follow</button>
+          <span id="map-zoom-lbl">100%</span>
+          <button type="button" id="map-refresh">Refresh</button>
+          <a class="btn" id="map-export" href="#" download="last_map.bin">Export</a>
+        </div>
+        <div id="map-legend">
+          <span><i style="background:#3ddc97"></i>dock</span>
+          <span><i style="background:#ff5028"></i>robot≈</span>
+          <span><i style="background:#ffb020"></i>start</span>
+          <span><i style="background:#00e5ff;box-shadow:0 0 0 2px #00343a"></i>target</span>
+          <span><i style="background:#c084fc"></i>place</span>
+          <span><i style="background:#f5f5f2;border:1px solid #555;border-radius:2px"></i>floor</span>
+          <span><i style="background:#1c1c20;border-radius:2px"></i>wall</span>
+          <span><i style="background:#28a0ff;border-radius:2px"></i>path</span>
+        </div>
+        <div id="map-msg">Loading… open this tab or press Refresh.</div>
+        <div class="kv" id="map-meta" style="margin-top:.4rem"></div>
+      </div>
+      <div class="card">
+        <h2>Manage maps</h2>
+        <div class="hint">Like stock/Valetudo: build a map, keep slots, load a saved map. Does not delete map files unless you choose Delete.</div>
+        <div class="row" style="margin-top:.4rem">
+          <button type="button" class="primary" id="map-start-mapping">Start mapping</button>
+          <button type="button" id="map-stop-mapping">Stop</button>
+          <button type="button" id="map-save-slot">Save as slot…</button>
+          <button type="button" id="map-mgr-refresh">Refresh list</button>
+        </div>
+        <div class="kv" id="map-slots" style="margin-top:.5rem">…</div>
+        <div class="hint" id="map-mgr-msg" style="margin-top:.35rem"></div>
+      </div>
+    </section>
+
+    <section id="p-music" class="page">
+      <div class="card">
+        <h2>When to play</h2>
+        <div class="hint">On-robot library <code>/mnt/data/rockctl/music/</code> — WAV only, tight disk.</div>
+        <div class="seg" style="margin-top:.5rem">
+          <button type="button" data-mmode="off">Off</button>
+          <button type="button" data-mmode="clean">While cleaning</button>
+          <button type="button" data-mmode="on">Always on</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Playback</h2>
+        <div class="seg">
+          <button type="button" data-pmode="once">Once</button>
+          <button type="button" data-pmode="loop">Loop</button>
+          <button type="button" data-pmode="shuffle">Shuffle</button>
+        </div>
+        <div class="row" style="margin-top:.5rem">
+          <button type="button" class="primary" id="music-play">Play</button>
+          <button type="button" class="bad" id="music-stop">Stop</button>
+          <button type="button" id="music-next">Next</button>
+          <button type="button" id="music-refresh">Refresh</button>
+        </div>
+        <div class="kv" id="music-st" style="margin-top:.5rem">…</div>
+      </div>
+      <div class="card">
+        <h2>Current selection</h2>
+        <div class="kv" id="music-cur-label">—</div>
+        <label style="margin-top:.4rem">Filename on device</label>
+        <input id="music-cur-name" type="text" spellcheck="false" placeholder="song.wav" maxlength="80"/>
+        <div class="row" style="margin-top:.4rem">
+          <button type="button" class="primary" id="music-cur-rename">Save name</button>
+          <button type="button" class="bad" id="music-cur-delete">Delete from robot</button>
+        </div>
+        <div class="hint" id="music-cur-msg">Rename or remove the selected track on the device.</div>
+      </div>
+      <div class="card">
+        <h2>Library</h2>
+        <div id="music-tracks" class="kv">…</div>
+        <label style="margin-top:.65rem">Upload</label>
+        <div class="hint" id="music-limits">Format: <b>WAV</b> only · max size from robot</div>
+        <input id="music-file" type="file" accept=".wav,audio/wav,audio/x-wav,audio/wave" style="margin:.35rem 0"/>
+        <div class="row">
+          <button type="button" class="cyan" id="music-upload">Upload &amp; select</button>
+        </div>
+        <div class="hint" id="music-up-msg"></div>
+      </div>
+    </section>
+
+    <section id="p-schedule" class="page">
+      <div class="card">
+        <h2>Cleaning schedule</h2>
+        <div class="hint">Jobs run on the robot clock while rockctl is up. Survives reboot under <code>/mnt/data/rockctl/schedule.json</code>.</div>
+        <div id="sched-list">…</div>
+        <div class="row" style="margin-top:.5rem">
+          <button type="button" id="sched-refresh">Refresh</button>
+          <button type="button" class="bad" id="sched-clear-all">Clear all</button>
+        </div>
+        <div class="hint" id="sched-msg" style="margin-top:.35rem"></div>
+      </div>
+      <div class="card" id="sched-form-card">
+        <h2 id="sched-form-title">Add cleaning</h2>
+        <input type="hidden" id="sched-id" value=""/>
+        <div class="form-grid">
+          <div>
+            <label>Time</label>
+            <input id="sched-time" type="time" value="09:00"/>
+          </div>
+          <div>
+            <label>Cycles</label>
+            <input id="sched-cycles" type="number" min="1" max="3" value="1"/>
+          </div>
+          <div class="full">
+            <label>Days</label>
+            <div class="preset-row">
+              <button type="button" data-sched-preset="weekdays">Weekdays</button>
+              <button type="button" data-sched-preset="weekend">Weekend</button>
+              <button type="button" data-sched-preset="everyday">Every day</button>
+            </div>
+            <div class="daychips" id="sched-days">
+              <button type="button" data-d="0">Sun</button>
+              <button type="button" data-d="1">Mon</button>
+              <button type="button" data-d="2">Tue</button>
+              <button type="button" data-d="3">Wed</button>
+              <button type="button" data-d="4">Thu</button>
+              <button type="button" data-d="5">Fri</button>
+              <button type="button" data-d="6">Sat</button>
+            </div>
+          </div>
+          <div>
+            <label>Clean type</label>
+            <select id="sched-type">
+              <option value="auto">Full auto clean</option>
+              <option value="spot">Spot clean</option>
+            </select>
+          </div>
+          <div>
+            <label>Suction</label>
+            <select id="sched-fan">
+              <option value="quiet">Quiet</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="turbo">Turbo</option>
+              <option value="max">Max</option>
+            </select>
+          </div>
+          <div>
+            <label>Mop moisture</label>
+            <select id="sched-water">
+              <option value="off" selected>Off / dry</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div class="full">
+            <label class="toggle-row">
+              <input id="sched-en" type="checkbox" checked/> Enabled (will run)
+            </label>
+          </div>
+        </div>
+        <div class="row" style="margin-top:.55rem">
+          <button type="button" class="primary" id="sched-save">Save</button>
+          <button type="button" id="sched-clear-form">New job</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="p-settings" class="page">
+      <div class="card" id="settings-gate-card">
+        <h2>Settings lock</h2>
+        <div class="hint" id="settings-gate-hint">password → Unlock / Enter</div>
+        <label>Web UI password</label>
+        <input id="settings-gate-pw" type="password" autocomplete="current-password" placeholder="password"/>
+        <div id="settings-gate-master-wrap" style="display:none;margin-top:.5rem">
+          <div class="hint">legacy laweb seal: password + master (64-hex) once</div>
+          <label>labauth master</label>
+          <input id="settings-gate-master" type="password" spellcheck="false" placeholder="64-hex master" autocomplete="off"/>
+        </div>
+        <div class="row" style="margin-top:.35rem;gap:.4rem">
+          <button type="button" class="primary" id="settings-gate-unlock">Unlock settings</button>
+          <button type="button" id="settings-gate-skip">No password yet (open)</button>
+        </div>
+        <div class="kv" id="settings-gate-st" style="margin-top:.35rem;color:var(--mut)"></div>
+      </div>
+      <div id="settings-body" style="display:none">
+      <div class="card">
+        <h2>Robot network</h2>
+        <div class="hint">One host for all services on this robot. Only ports differ (not separate IPs per service).</div>
+        <label>Host (IP or name)</label>
+        <input id="cfg-host" type="text" spellcheck="false" placeholder="robot IP or hostname (empty = this page’s host)"/>
+        <div class="row" style="gap:.75rem;margin-top:.35rem;align-items:flex-end">
+          <div style="flex:1;min-width:6rem">
+            <label>rockctl port</label>
+            <input id="cfg-rock-port" type="number" min="1" max="65535" placeholder="8080"/>
+          </div>
+          <div style="flex:1;min-width:6rem">
+            <label>Assist port</label>
+            <input id="cfg-assist-port" type="number" min="1" max="65535" placeholder="8787"/>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:.4rem">When this page is served by rockctl, host defaults to this page’s host. Override with <code>?host=</code>, <code>?rockPort=</code>, <code>?assistPort=</code>.</div>
+        <div class="kv" id="cfg-derived" style="margin-top:.4rem;color:var(--mut)"></div>
+        <div class="row" style="margin-top:.4rem">
+          <button class="primary" type="button" id="cfg-save">Save</button>
+          <button type="button" id="cfg-ping">Ping</button>
+        </div>
+        <div class="kv" id="cfg-st" style="margin-top:.4rem"></div>
+      </div>
+      <div class="card">
+        <h2>Peer token (assist LAN security)</h2>
+        <div class="hint">ClankerDash generates and installs the nanobot peer token on the robot
+          via rockctl <code>POST /api/v1/assist/peer_token</code>. Also saved in this browser for Assistant.</div>
+        <label>Peer token</label>
+        <input id="cfg-mcp-token" type="password" autocomplete="off" spellcheck="false" placeholder="generate or paste"/>
+        <label class="toggle-row">
+          <input id="cfg-mcp-showtok" type="checkbox"/> Show token
+        </label>
+        <div class="row" style="margin-top:.4rem;gap:.4rem;flex-wrap:wrap">
+          <button type="button" class="primary" id="cfg-tok-gen">Generate &amp; install on robot</button>
+          <button type="button" id="cfg-tok-admin">Admin reset (labauth master)</button>
+          <button type="button" id="cfg-tok-status">Robot status</button>
+          <button type="button" id="cfg-tok-save">Save in browser</button>
+        </div>
+        <div class="kv" id="cfg-tok-st" style="margin-top:.35rem;color:var(--mut)"></div>
+        <!-- kept for fillCfg/readCfgForm compatibility -->
+        <input type="hidden" id="cfg-mcp-en" value="1"/>
+        <input type="hidden" id="cfg-mcp-mode" value="peer"/>
+      </div>
+      <div class="card">
+        <h2>Lab master auth (labauth)</h2>
+        <div class="hint">
+          Ultimate key is enrolled over <b>USB</b> with <b>ClankerCommander</b> / <code>labauth</code>
+          (not branded nanobot). Fingerprint is public; master is secret.
+          Web UI passwords are sealed under the master key.
+          See your labauth / USB master enrollment docs (out of tree).
+        </div>
+        <label>Device fingerprint (public)</label>
+        <input id="auth-fp" type="text" spellcheck="false" placeholder="64-hex from labauth fingerprint …" autocomplete="off"/>
+        <label>Master key (session only — paste hex from USB enroll, not stored in localStorage)</label>
+        <input id="auth-master" type="password" spellcheck="false" placeholder="64-hex master or leave empty" autocomplete="off"/>
+        <label class="toggle-row">
+          <input id="auth-show-master" type="checkbox"/> Show master
+        </label>
+        <div class="row" style="margin-top:.35rem">
+          <button type="button" id="auth-unlock">Unlock session</button>
+          <button type="button" id="auth-lock">Lock</button>
+        </div>
+        <div class="kv" id="auth-st" style="margin-top:.35rem;color:var(--mut)">locked</div>
+        <h2 style="margin-top:1rem">Web UI password</h2>
+        <div class="hint">gate: local salt+hash. optional laweb2 seal if master unlocked.</div>
+        <label>New password</label>
+        <input id="auth-pw" type="password" autocomplete="new-password"/>
+        <label>Confirm</label>
+        <input id="auth-pw2" type="password" autocomplete="new-password"/>
+        <div class="row" style="margin-top:.35rem">
+          <button type="button" class="primary" id="auth-pw-set">Set / reset password</button>
+          <button type="button" id="auth-pw-verify">Verify password</button>
+          <button type="button" id="auth-pw-clear">Clear password gate</button>
+        </div>
+        <label style="margin-top:.5rem">Sealed password record (laweb2:…)</label>
+        <textarea id="auth-pw-env" rows="3" spellcheck="false" placeholder="exported envelope"></textarea>
+        <div class="kv" id="auth-pw-st" style="margin-top:.35rem"></div>
+      </div>
+      <div class="card">
+        <h2>Self-improve (via assist peer)</h2>
+        <div class="hint">One cycle through the assist peer on this host. Optional.</div>
+        <div class="row">
+          <button type="button" class="cyan" id="cfg-improve">Run one cycle</button>
+          <button type="button" id="cfg-improve-status">Status prompt</button>
+        </div>
+        <div class="kv" id="cfg-improve-st" style="margin-top:.4rem"></div>
+      </div>
+      <p class="foot">ClankerDash talks to one robot host: rockctl (control) + assist (optional). No separate IP per service.</p>
+      </div><!-- #settings-body -->
+    </section>
+
+    <section id="p-assist" class="page">
+      <div class="card">
+        <h2>Assistant services</h2>
+        <div class="hint" id="assist-hint">Control nanobot on the robot. Web UI link opens advanced settings in a new tab.</div>
+        <div class="kv" id="assist-status" style="margin:.4rem 0">…</div>
+        <div class="row" style="margin:.5rem 0 .35rem;gap:.5rem;flex-wrap:wrap">
+          <button type="button" id="assist-tog" data-svc="assist">Assist · …</button>
+          <button type="button" id="assist-ui-tog" data-svc="ui">Web UI · …</button>
+          <button type="button" id="assist-mcp-tog" data-svc="mcp">MCP chat · …</button>
+          <button type="button" id="assist-refresh">Refresh</button>
+        </div>
+        <div class="row" style="margin-top:.35rem">
+          <a class="btn cyan" id="assist-open-ui" href="#" target="_blank" rel="noopener">Open Web UI →</a>
+        </div>
+        <div class="hint" id="assist-svc-msg" style="margin-top:.4rem"></div>
+      </div>
+      <div class="card">
+        <h2>Chat</h2>
+        <div class="hint">Uses the robot assist peer (MCP-style prompt bus). Turn <b>MCP chat</b> on above.</div>
+        <div id="log"></div>
+        <div id="composer">
+          <input id="q" type="text" maxlength="2000" placeholder="Ask · @! shell on peer host"/>
+          <button class="cyan" type="button" id="ask">Ask</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const STATES={1:'starting',2:'charger_disc',3:'idle',5:'cleaning',6:'returning',7:'manual',
+  8:'charging',9:'charge_err',10:'paused',11:'spot',12:'error',15:'docking',16:'goto',17:'zoned',18:'segment'};
+/* Manual RC pad state (declared early for refreshStatus) */
+const manual = {
+  engaged: false,
+  speed: 'med',
+  seq: 1,
+  holdDir: null,
+  holdTimer: null,
+  busy: false,
+  lastErr: '',
+};
+let mapMeta = null;
+let mapPixels = null; // full RRSLAM plane (width*height)
+let mapFull = { w: 0, h: 0 };
+let mapCrop = { x: 0, y: 0, w: 0, h: 0 }; // content crop (Valetudo-style tight view)
+let mapOff = null;    // offscreen = cropped content only
+let mapView = { z: 1, x: 0, y: 0 }; // zoom + pan (CSS px)
+let mapDrag = null;
+let mapPinch = null;
+let mapPick = null;   // {px,py in crop space, slam, goto}
+
+function loadCfg(){ try{return JSON.parse(localStorage.getItem('clankerdash_cfg')||'{}');}catch(e){return{};} }
+function saveCfg(c){
+  /* Never persist a peer token that only arrived via ?token= (sessionStorage). */
+  const o=Object.assign({}, c||{});
+  try{
+    const sess=sessionStorage.getItem('clankerdash_session_peer_token')||'';
+    if(sess && o.mcpToken===sess){
+      const prev=loadCfg();
+      /* keep prior durable token if any; drop qs-only value */
+      o.mcpToken = prev.mcpToken || '';
+    }
+  }catch(e){}
+  localStorage.setItem('clankerdash_cfg', JSON.stringify(o));
+}
+/** Peer token from ?token= — session only, never localStorage. */
+function sessionPeerToken(){
+  try{ return sessionStorage.getItem('clankerdash_session_peer_token')||''; }catch(e){ return ''; }
+}
+(function ingestQsPeerToken(){
+  try{
+    const t=new URLSearchParams(location.search).get('token');
+    if(t) sessionStorage.setItem('clankerdash_session_peer_token', t);
+  }catch(e){}
+})();
+
+/** Parse host (+ optional port) from a URL or bare host string. */
+function parseHostPort(s){
+  if(!s) return {host:'', port:0};
+  s=String(s).trim();
+  try{
+    if(s.startsWith('http://')||s.startsWith('https://')){
+      const u=new URL(s);
+      return {host:u.hostname, port:u.port?parseInt(u.port,10):0, proto:u.protocol.replace(':','')};
+    }
+  }catch(e){}
+  // host:port or bare host
+  const m=s.match(/^([^:/]+)(?::(\d+))?$/);
+  if(m) return {host:m[1], port:m[2]?parseInt(m[2],10):0};
+  return {host:s, port:0};
+}
+
+/**
+ * Query overrides: ?host=ROBOT&rockPort=8080&assistPort=8787&mcp=peer&token=…
+ * ?token= is session-only (see ingestQsPeerToken); never merged into durable cfg.
+ * Legacy: ?rockctl=http://H:8080 still migrates to host + ports.
+ */
+function qsCfg(){
+  try{
+    const q=new URLSearchParams(location.search);
+    const o={};
+    if(q.get('host')) o.host=q.get('host');
+    if(q.get('rockPort')) o.rockPort=parseInt(q.get('rockPort'),10);
+    if(q.get('assistPort')||q.get('nanoPort')) o.assistPort=parseInt(q.get('assistPort')||q.get('nanoPort'),10);
+    if(q.get('mcp')) o.mcpMode=q.get('mcp');
+    /* deliberately no o.mcpToken from q — sessionStorage only */
+    // legacy full URLs → host only (ports from URL if present)
+    if(q.get('rockctl')){
+      const p=parseHostPort(q.get('rockctl'));
+      if(p.host) o.host=p.host;
+      if(p.port) o.rockPort=p.port;
+    }
+    if(q.get('nano')){
+      const p=parseHostPort(q.get('nano'));
+      if(p.host && !o.host) o.host=p.host;
+      if(p.port) o.assistPort=p.port;
+    }
+    return o;
+  }catch(e){ return {}; }
+}
+
+/** Defaults: page hostname when served from rockctl; standard ports. Never bake a lab IP. */
+function defaults(){
+  let host='';
+  let rockPort=8080, assistPort=8787;
+  try{
+    if(location.protocol==='http:'||location.protocol==='https:'){
+      host = location.hostname || '';
+      const p = location.port ? parseInt(location.port,10) : 0;
+      if(p===8787){ /* opened on assist by mistake */ }
+      else if(p>0) rockPort=p;
+    }
+  }catch(e){}
+  return {
+    host, rockPort, assistPort,
+    mcpEnabled: true,
+    mcpToken: '',
+    mcpMode: 'peer'
+  };
+}
+
+/** Migrate old {rock,nano,mcpUrl} full URLs → host + ports. */
+function migrateCfg(raw){
+  const c = Object.assign({}, raw||{});
+  if(c.host) return c;
+  if(c.rock || c.nano || c.mcpUrl){
+    const pr = parseHostPort(c.rock||'');
+    const pn = parseHostPort(c.nano||c.mcpUrl||'');
+    c.host = pr.host || pn.host || '';
+    if(pr.port) c.rockPort = pr.port;
+    if(pn.port) c.assistPort = pn.port;
+  }
+  return c;
+}
+
+function cfg(){
+  const d=defaults();
+  const c=Object.assign({}, d, migrateCfg(loadCfg()), qsCfg());
+  let host=(c.host||d.host||'').trim();
+  // strip accidental scheme/path
+  if(host.includes('://')) host=parseHostPort(host).host;
+  host=host.replace(/\/$/,'');
+  let rockPort=parseInt(c.rockPort,10); if(!rockPort||rockPort<1) rockPort=8080;
+  let assistPort=parseInt(c.assistPort,10); if(!assistPort||assistPort<1) assistPort=8787;
+  const proto='http';
+  const rock = host ? `${proto}://${host}:${rockPort}` : '';
+  const nano = host ? `${proto}://${host}:${assistPort}` : '';
+  return {
+    host, rockPort, assistPort,
+    rock, nano,
+    mcpEnabled: c.mcpEnabled !== undefined ? !!c.mcpEnabled : d.mcpEnabled,
+    mcpUrl: nano, // always same host:assistPort
+    /* session qs token wins for this tab only; durable form/localStorage second */
+    mcpToken: sessionPeerToken() || c.mcpToken || '',
+    mcpMode: c.mcpMode || d.mcpMode
+  };
+}
+
+function updateDerivedCfg(){
+  const el=$('cfg-derived');
+  if(!el) return;
+  const c=cfg();
+  if(!c.host){ el.textContent='No host — open this page from rockctl or set host above.'; return; }
+  el.innerHTML =
+    `<div><span>rockctl</span> ${c.rock}</div>`+
+    `<div><span>assist</span> ${c.nano}</div>`;
+}
+
+/** Optional: read device name from rockctl; never override host with a second IP. */
+async function hydrateFromServer(){
+  const c=cfg();
+  if(!c.rock) return;
+  try{
+    const r=await fetch(c.rock+'/api/v1/config');
+    if(!r.ok) return;
+    const j=await r.json();
+    const cur=loadCfg();
+    if(j.name && !cur.deviceName){
+      saveCfg(Object.assign({}, migrateCfg(cur), {deviceName:j.name}));
+    }
+  }catch(e){ /* offline */ }
+}
+function peerHeaders(extra){
+  const h = Object.assign({'Content-Type':'application/json'}, extra||{});
+  const t = cfg().mcpToken;
+  if(t) h['X-Nanobot-Peer-Token'] = t;
+  return h;
+}
+async function peerJson(path, opt){
+  const base = cfg().nano; // host + assist port only
+  if(!base) throw new Error('set robot host in Settings');
+  const r = await fetch(base + path, opt);
+  const t = await r.text();
+  let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
+  if(!r.ok) throw new Error(j.error||t||('HTTP '+r.status));
+  return j;
+}
+
+function showTab(name){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===name));
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on', p.id==='p-'+name));
+  if(mapRefreshTimer){ clearInterval(mapRefreshTimer); mapRefreshTimer=null; }
+  if(name==='map'){
+    refreshMap();
+    // Live path while Map tab open — slower on phones to keep UI responsive
+    const period = (window.matchMedia && matchMedia('(max-width:720px)').matches) ? 4500 : 2500;
+    mapRefreshTimer=setInterval(()=>{
+      if(document.getElementById('p-map')&&document.getElementById('p-map').classList.contains('on'))
+        refreshMapQuiet();
+    }, period);
+  }
+  if(name==='music') refreshMusic();
+  if(name==='schedule') loadSchedule();
+  if(name==='assist') refreshAssistServices();
+}
+/** Reload map pixels without resetting pan/zoom/pick (for live path). */
+let mapQuietBusy = false;
+let mapFollowRobot = false;
+let mapRobotTrail = []; // crop-local {px,py,t} recent positions
+let mapLastState = null;
+
+async function refreshMapQuiet(){
+  if(!mapMeta||!cfg().rock || mapQuietBusy) return;
+  mapQuietBusy = true;
+  try{
+    const mapName=(mapMeta.active||'last_map');
+    const res=await fetch(cfg().rock+'/api/v1/maps/'+mapName+(mapName.indexOf('?')>=0?'&':'?')+'t='+Date.now(),{
+      cache:'no-store'
+    });
+    if(!res.ok) return;
+    const ab=await res.arrayBuffer();
+    const buf=new Uint8Array(ab);
+    let w=mapMeta.width|0, h=mapMeta.height|0, off=mapMeta.data_offset|46;
+    if(buf[0]===0x52&&buf[1]===0x52){
+      const dv0=new DataView(ab);
+      const wh=dv0.getInt32(0x16,true), hh=dv0.getInt32(0x1a,true);
+      if(wh>32&&wh<4096){ w=wh; h=hh; off=46; }
+      // refresh charger/start when present in side files via maps meta (cheap)
+    }
+    if(w*h+off>buf.length) return;
+    const prevRobot = mapRobotPx ? {px:mapRobotPx.px, py:mapRobotPx.py} : null;
+    mapFull={w,h};
+    mapPixels=buf.subarray(off,off+w*h);
+    // Expand crop if path / robot would be clipped (don't jump view).
+    ensureCropCoversActivity();
+    buildOffscreen();
+    pushRobotTrail(prevRobot);
+    // Live state label (cleaning / goto / dock…)
+    try{
+      const st=await rock('/api/v1/status');
+      const r=(st.result&&st.result[0])||st;
+      if(r){
+        mapLastState = r.state|0;
+        const moving = [5,6,11,15,16,17,18].indexOf(mapLastState)>=0;
+        if(moving && mapFollowRobot && mapRobotPx)
+          centerOnCropPx(mapRobotPx.px, mapRobotPx.py, null);
+      }
+    }catch(e){}
+    drawMap();
+    updateMapLiveLabel();
+  }catch(e){}
+  finally{ mapQuietBusy = false; }
+}
+
+function pushRobotTrail(prev){
+  if(!mapRobotPx) return;
+  const now=Date.now();
+  const cur={px:mapRobotPx.px, py:mapRobotPx.py, t:now};
+  // only append if moved ≥ ~0.4 map cells
+  const last=mapRobotTrail.length?mapRobotTrail[mapRobotTrail.length-1]:null;
+  if(!last || Math.hypot(cur.px-last.px, cur.py-last.py) >= 0.4)
+    mapRobotTrail.push(cur);
+  // keep ~90s / 80 points
+  while(mapRobotTrail.length>80 || (mapRobotTrail.length && now-mapRobotTrail[0].t>90000))
+    mapRobotTrail.shift();
+  // also drop if prev and cur jumped wildly (map rematch)
+  if(prev && Math.hypot(cur.px-prev.px, cur.py-prev.py) > 40)
+    mapRobotTrail = [cur];
+}
+
+/** Grow crop when path/robot leaves the padded frame (keeps pan/zoom). */
+function ensureCropCoversActivity(){
+  if(!mapPixels||!mapFull.w||!mapCrop.w) return;
+  const fw=mapFull.w, fh=mapFull.h;
+  let {x:cx,y:cy,w:cw,h:ch}=mapCrop;
+  let changed=false;
+  const pad=8;
+  // scan path pixels; if outside crop, expand
+  const step = (fw*fh > 200000) ? 3 : 2;
+  let minx=cx, miny=cy, maxx=cx+cw-1, maxy=cy+ch-1;
+  for(let y=0;y<fh;y+=step){
+    const row=y*fw;
+    for(let x=0;x<fw;x+=step){
+      const v=mapPixels[row+x];
+      if(v<0x01||v>0x1f) continue;
+      if(x<minx) minx=x;
+      if(y<miny) miny=y;
+      if(x>maxx) maxx=x;
+      if(y>maxy) maxy=y;
+    }
+  }
+  minx=Math.max(0,minx-pad); miny=Math.max(0,miny-pad);
+  maxx=Math.min(fw-1,maxx+pad); maxy=Math.min(fh-1,maxy+pad);
+  if(minx<cx||miny<cy||maxx>cx+cw-1||maxy>cy+ch-1){
+    // expand only (never shrink mid-session — avoids jumpy view)
+    const nx=Math.min(cx,minx), ny=Math.min(cy,miny);
+    const nmaxx=Math.max(cx+cw-1,maxx), nmaxy=Math.max(cy+ch-1,maxy);
+    // shift markers if crop origin moves
+    const dx=cx-nx, dy=cy-ny;
+    mapCrop={x:nx,y:ny,w:nmaxx-nx+1,h:nmaxy-ny+1};
+    if(dx||dy){
+      if(mapRobotPx){ mapRobotPx.px+=dx; mapRobotPx.py+=dy; }
+      mapRobotTrail.forEach(p=>{ p.px+=dx; p.py+=dy; });
+      if(mapPick){ mapPick.px+=dx; mapPick.py+=dy; }
+    }
+    changed=true;
+  }
+  return changed;
+}
+
+function updateMapLiveLabel(){
+  const msg=$('map-msg');
+  if(!msg||!mapMeta) return;
+  const st = mapLastState!=null ? (STATES[mapLastState]||('state '+mapLastState)) : '';
+  const parts=[];
+  if(st) parts.push(st);
+  if(mapRobotPx) parts.push('R≈ path tip');
+  parts.push('live every 2s');
+  if(mapFollowRobot) parts.push('follow on');
+  msg.textContent = parts.join(' · ');
+  const meta=$('map-meta');
+  if(meta && mapRobotPx){
+    // soft-update robot line without wiping full meta
+    const line = meta.querySelector('[data-live-robot]');
+    const html = `<div data-live-robot><span>robot≈</span> ${mapRobotPx.px.toFixed(0)},${mapRobotPx.py.toFixed(0)} · conf ${mapRobotPx.conf}${mapRobotTrail.length?(' · trail '+mapRobotTrail.length):''}</div>`;
+    if(line) line.outerHTML=html; else meta.insertAdjacentHTML('beforeend', html);
+  }
+}
+function centerOnCropPx(px, py, z){
+  if(!mapMeta||px==null) return;
+  const wrap=$('mapwrap');
+  if(z!=null) mapView.z=z;
+  const base=fitBase();
+  const s=base*mapView.z;
+  mapView.x = (wrap.clientWidth/2) - px*s;
+  mapView.y = (wrap.clientHeight/2) - py*s;
+  drawMap();
+}
+document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+
+async function rock(path, opt){
+  const r = await fetch(cfg().rock + path, opt);
+  const t = await r.text();
+  let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
+  if(!r.ok) throw new Error(j.error||t||r.status);
+  return j;
+}
+
+function parseStatus(j){ return (j.result&&j.result[0])||j; }
+
+/** miio fan_power → quiet|balanced|turbo|max */
+function fanLevelFromStatus(r){
+  const v = r.fan_power != null ? Number(r.fan_power) : NaN;
+  if(v===101||v===38||v===1010) return 'quiet';
+  if(v===102||v===60||v===1020) return 'balanced';
+  if(v===103||v===75||v===1030) return 'turbo';
+  if(v===104||v===100||v===105||v===1040) return 'max';
+  // some firmwares use 101–104 only
+  if(v>=101&&v<=104) return ['quiet','balanced','turbo','max'][v-101];
+  return null;
+}
+/** miio water_box_mode → off|low|medium|high */
+function waterLevelFromStatus(r){
+  const v = r.water_box_mode != null ? Number(r.water_box_mode)
+    : (r.water_box_custom_mode != null ? Number(r.water_box_custom_mode) : NaN);
+  if(v===200||v===0) return 'off';
+  if(v===201||v===1) return 'low';
+  if(v===202||v===2) return 'medium';
+  if(v===203||v===3||v===204) return 'high';
+  if(v>=200&&v<=203) return ['off','low','medium','high'][v-200];
+  return null;
+}
+function markSegment(sel, active){
+  document.querySelectorAll(sel).forEach(b=>{
+    const key = b.dataset.fan || b.dataset.water;
+    const on = active && key === active;
+    b.classList.toggle('on', !!on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+function labelFan(lvl){
+  return ({quiet:'Quiet',balanced:'Balanced',turbo:'Turbo',max:'Max'})[lvl]||lvl||'?';
+}
+function labelWater(lvl){
+  return ({off:'Off',low:'Low',medium:'Medium',high:'High'})[lvl]||lvl||'?';
+}
+
+async function refreshResources(){
+  const el=$('res'); if(!el) return;
+  try{
+    const j=await rock('/api/v1/resources');
+    const mb=k=>((k||0)/1024).toFixed(1)+'M';
+    const warn=j.warn?' <span class="bad">WARN</span>':'';
+    const ng=j.services&&j.services.nanobot;
+    el.innerHTML =
+      `<div><span>RAM free-ish</span> ${mb(j.mem_avail_kb)} / ${mb(j.mem_total_kb)}${warn}</div>`+
+      `<div><span>data free</span> ${mb(j.data_free_kb)} / ${mb(j.data_total_kb)}</div>`+
+      `<div><span>load</span> ${j.load1} ${j.load5} ${j.load15}</div>`+
+      `<div><span>nanobot</span> ${ng&&ng.alive?('rss '+ng.rss_kb+'k'):'down'} · <span>rockctl</span> ok</div>`;
+  }catch(e){ el.textContent='resources: '+e.message; }
+}
+async function refreshStatus(){
+  try{
+    const j = await rock('/api/v1/status');
+    const r = parseStatus(j);
+    const label = STATES[r.state]||('state '+r.state);
+    const fanLvl = fanLevelFromStatus(r);
+    const waterLvl = waterLevelFromStatus(r);
+    markSegment('[data-fan]', fanLvl);
+    markSegment('[data-water]', waterLvl);
+    const fanTxt = fanLvl
+      ? `${labelFan(fanLvl)} (${r.fan_power})`
+      : String(r.fan_power??'?');
+    const waterTxt = waterLvl
+      ? `${labelWater(waterLvl)} (${r.water_box_mode??r.water_box_status??'?'})`
+      : String(r.water_box_mode??r.water_box_status??'?');
+    $('status').innerHTML =
+      `<div><span>state</span> ${label} (${r.state})</div>`+
+      `<div><span>battery</span> ${r.battery!=null?r.battery+'%':'?'}</div>`+
+      `<div><span>suction</span> ${fanTxt} · <span>moist</span> ${waterTxt}</div>`+
+      `<div><span>clean</span> ${r.in_cleaning??'?'} · <span>return</span> ${r.in_returning??'?'} · <span>mop dock</span> ${r.water_box_carriage_status??'?'}</div>`+
+      `<div><span>manual</span> ${Number(r.state)===7?'RC on':'off'}</div>`;
+    $('pill').innerHTML =
+      `<span class="ok">${label}</span> · ${r.battery!=null?r.battery+'%':''}`+
+      (fanLvl?` · ${labelFan(fanLvl)}`:'')+
+      (waterLvl?` · mop ${labelWater(waterLvl)}`:'')+
+      (Number(r.state)===7?' · RC':'');
+    /* Keep manual pad status in sync with robot state */
+    if(Number(r.state)===7){
+      manual.engaged = true;
+      if(!manual.holdDir && typeof manualSetStatus==='function')
+        manualSetStatus('ENGAGED · robot in manual mode', true);
+    }else if(manual.engaged && (Number(r.state)===8 || Number(r.state)===3)){
+      manual.engaged = false;
+      if(!manual.holdDir && typeof manualSetStatus==='function')
+        manualSetStatus('idle · not in manual mode', false);
+    }
+    refreshResources();
+  }catch(e){
+    $('status').textContent='status error: '+e.message;
+    $('pill').innerHTML='<span class="bad">offline</span>';
+    markSegment('[data-fan]', null);
+    markSegment('[data-water]', null);
+  }
+}
+
+async function control(action){
+  try{
+    await rock('/api/v1/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
+    setTimeout(refreshStatus,700);
+  }catch(e){ alert(action+' failed: '+e.message); }
+}
+async function fan(level){
+  try{
+    markSegment('[data-fan]', level); // optimistic
+    await rock('/api/v1/fan',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({level})});
+    setTimeout(refreshStatus,400);
+  }catch(e){ alert('fan: '+e.message); refreshStatus(); }
+}
+async function water(level){
+  try{
+    markSegment('[data-water]', level); // optimistic
+    await rock('/api/v1/water',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({level})});
+    setTimeout(refreshStatus,400);
+  }catch(e){ alert('moist: '+e.message); refreshStatus(); }
+}
+document.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>control(b.dataset.act));
+document.querySelectorAll('[data-fan]').forEach(b=>b.onclick=()=>fan(b.dataset.fan));
+document.querySelectorAll('[data-water]').forEach(b=>b.onclick=()=>water(b.dataset.water));
+
+/* ----- Manual drive (app_rc_* via /api/v1/manual) ----- */
+function manualSetStatus(txt, on){
+  const el = $('manual-status');
+  if(!el) return;
+  el.innerHTML = on
+    ? `<span class="on">${txt}</span>`
+    : `<span class="off">${txt}</span>`;
+}
+function manualMarkSpeed(){
+  document.querySelectorAll('[data-mspeed]').forEach(b=>{
+    const on = b.dataset.mspeed === manual.speed;
+    b.classList.toggle('on', on);
+  });
+}
+async function manualApi(body){
+  try{
+    return await rock('/api/v1/manual',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+  }catch(e){
+    /* Fallback for older rockctl without /manual */
+    const act = body.action||'';
+    if(act==='start'||act==='engage'){
+      return rock('/api/v1/raw',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({method:'app_rc_start',params:[]})});
+    }
+    if(act==='stop'||act==='end'||act==='disengage'){
+      return rock('/api/v1/raw',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({method:'app_rc_end',params:[]})});
+    }
+    const speedMap = {slow:{v:0.12,o:0.7},med:{v:0.2,o:1.1},fast:{v:0.28,o:1.6}};
+    const sp = speedMap[body.speed||manual.speed]||speedMap.med;
+    let velocity=0, omega=0;
+    if(act==='forward') velocity=sp.v;
+    else if(act==='back') velocity=-sp.v;
+    else if(act==='left') omega=sp.o;
+    else if(act==='right') omega=-sp.o;
+    else if(act==='move'){ velocity=body.velocity||0; omega=body.omega||0; }
+    else if(act==='halt'){ velocity=0; omega=0; }
+    else throw e;
+    const seq = body.seqnum!=null ? body.seqnum : (manual.seq++);
+    return rock('/api/v1/raw',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({method:'app_rc_move',params:[{
+        velocity, omega,
+        duration: body.duration||400,
+        seqnum: seq
+      }]})});
+  }
+}
+async function manualEngage(on){
+  try{
+    if(on){
+      await manualApi({action:'start'});
+      manual.engaged = true;
+      manualSetStatus('ENGAGED · hold pad or WASD · no cleaning', true);
+    }else{
+      manualStopHold();
+      await manualApi({action:'stop'});
+      manual.engaged = false;
+      manualSetStatus('disengaged · idle', false);
+    }
+    setTimeout(refreshStatus, 600);
+  }catch(e){
+    manual.lastErr = e.message||String(e);
+    manualSetStatus('error: '+manual.lastErr, false);
+    alert('Manual: '+manual.lastErr);
+  }
+}
+async function manualPulse(dir){
+  if(manual.busy) return;
+  if(!manual.engaged && dir!=='halt'){
+    /* auto-engage on first move */
+    try{
+      await manualApi({action:'start'});
+      manual.engaged = true;
+      manualSetStatus('ENGAGED · auto · hold pad', true);
+    }catch(e){
+      manualSetStatus('engage failed: '+(e.message||e), false);
+      return;
+    }
+  }
+  manual.busy = true;
+  const seq = manual.seq++;
+  try{
+    await manualApi({
+      action: dir,
+      speed: manual.speed,
+      duration: 420,
+      seqnum: seq
+    });
+    manualSetStatus(
+      (manual.engaged?'ENGAGED · ':'')+dir+' · '+manual.speed+' · seq '+seq,
+      !!manual.engaged
+    );
+  }catch(e){
+    manual.lastErr = e.message||String(e);
+    manualSetStatus('move error: '+manual.lastErr, false);
+  }finally{
+    manual.busy = false;
+  }
+}
+function manualStopHold(){
+  if(manual.holdTimer){ clearInterval(manual.holdTimer); manual.holdTimer=null; }
+  manual.holdDir = null;
+  document.querySelectorAll('#manual-dpad button').forEach(b=>b.classList.remove('held'));
+}
+function manualStartHold(dir, btn){
+  manualStopHold();
+  manual.holdDir = dir;
+  if(btn) btn.classList.add('held');
+  manualPulse(dir);
+  if(dir==='halt') return;
+  manual.holdTimer = setInterval(()=>{
+    if(manual.holdDir===dir) manualPulse(dir);
+  }, 280);
+}
+function bindManualPad(){
+  const pad = $('manual-dpad');
+  if(!pad) return;
+  pad.querySelectorAll('[data-mdir]').forEach(btn=>{
+    const dir = btn.dataset.mdir;
+    const down = (ev)=>{
+      ev.preventDefault();
+      try{ btn.setPointerCapture && btn.setPointerCapture(ev.pointerId); }catch(_){}
+      manualStartHold(dir, btn);
+    };
+    const up = (ev)=>{
+      ev.preventDefault();
+      if(dir!=='halt') manualStopHold();
+      else document.querySelectorAll('#manual-dpad button').forEach(b=>b.classList.remove('held'));
+    };
+    btn.addEventListener('pointerdown', down);
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('lostpointercapture', up);
+    /* avoid context menu on long-press */
+    btn.addEventListener('contextmenu', e=>e.preventDefault());
+  });
+  document.querySelectorAll('[data-mspeed]').forEach(b=>{
+    b.onclick = ()=>{ manual.speed = b.dataset.mspeed; manualMarkSpeed(); };
+  });
+  if($('manual-engage')) $('manual-engage').onclick = ()=>manualEngage(true);
+  if($('manual-disengage')) $('manual-disengage').onclick = ()=>manualEngage(false);
+  manualMarkSpeed();
+  /* WASD when Control tab visible */
+  window.addEventListener('keydown', (ev)=>{
+    if(ev.repeat) return;
+    const page = $('p-control');
+    if(!page || !page.classList.contains('on')) return;
+    if(ev.target && /input|textarea|select/i.test(ev.target.tagName)) return;
+    const map = {KeyW:'forward',KeyS:'back',KeyA:'left',KeyD:'right',ArrowUp:'forward',ArrowDown:'back',ArrowLeft:'left',ArrowRight:'right',Space:'halt'};
+    const dir = map[ev.code];
+    if(!dir) return;
+    ev.preventDefault();
+    const btn = pad.querySelector('[data-mdir="'+dir+'"]');
+    manualStartHold(dir, btn);
+  });
+  window.addEventListener('keyup', (ev)=>{
+    const map = {KeyW:1,KeyS:1,KeyA:1,KeyD:1,ArrowUp:1,ArrowDown:1,ArrowLeft:1,ArrowRight:1,Space:1};
+    if(!map[ev.code]) return;
+    if(ev.code!=='Space') manualStopHold();
+  });
+}
+bindManualPad();
+
+/* ----- MAP (RRSLAM) — crop, high-contrast layers, robot estimate ----- */
+let mapRobotPx = null;   // crop-local {px,py} estimate
+let mapPlaces = [];      // [{name,x,y}] miio/goto frame
+let mapRefreshTimer = null;
+
+/* High-contrast palette (readable on phone; Valetudo-inspired). */
+function colorFor(v){
+  if(v===0x80) return [245,245,242];       // free floor — bright
+  if(v===0x00) return [28,28,32];          // wall / obstacle — near black
+  if(v===0xff||v===0xfe) return [110,118,128]; // unexplored
+  if(v===0xfd) return [90,96,104];
+  if(v>=0x01&&v<=0x07) return [255, 90, 40];   // recent path (warm)
+  if(v>=0x08&&v<=0x1f) return [40, 160, 255];  // path trail (blue)
+  if(v>=0x20&&v<=0x7f) return [190, 150, 90];  // carpet / structure
+  if(v>=0x81&&v<=0x9f) return [235, 235, 230];
+  return [150,150,155];
+}
+
+/**
+ * Crop to explored content: free floor + walls + path.
+ * Skip only pure unexplored so the house fills the view (not a tiny wall-only box).
+ */
+function computeCrop(){
+  const fw=mapFull.w, fh=mapFull.h;
+  let minx=fw, miny=fh, maxx=-1, maxy=-1;
+  const src=mapPixels;
+  for(let y=0;y<fh;y++){
+    const row=y*fw;
+    for(let x=0;x<fw;x++){
+      const v=src[row+x];
+      if(v===0xff||v===0xfe) continue; // unexplored only
+      if(x<minx) minx=x; if(y<miny) miny=y;
+      if(x>maxx) maxx=x; if(y>maxy) maxy=y;
+    }
+  }
+  function includeSlam(s){
+    if(!s) return;
+    const p=slamToPixelFull(s.x,s.y);
+    const x=Math.round(p.px), y=Math.round(p.py);
+    if(x<0||y<0||x>=fw||y>=fh) return;
+    if(x<minx) minx=x; if(y<miny) miny=y;
+    if(x>maxx) maxx=x; if(y>maxy) maxy=y;
+  }
+  includeSlam(mapMeta&&mapMeta.charger);
+  includeSlam(mapMeta&&mapMeta.start);
+  if(!fw||!fh){ mapCrop={x:0,y:0,w:1,h:1}; return; }
+  if(maxx<minx){ mapCrop={x:0,y:0,w:fw,h:fh}; return; }
+  const pad=10;
+  minx=Math.max(0,minx-pad); miny=Math.max(0,miny-pad);
+  maxx=Math.min(fw-1,maxx+pad); maxy=Math.min(fh-1,maxy+pad);
+  mapCrop={x:minx,y:miny,w:maxx-minx+1,h:maxy-miny+1};
+}
+
+/**
+ * Estimate robot cell from RRSLAM path layer.
+ * Path values 0x01–0x07 are *recent* (warm), 0x08–0x1f fade older.
+ * Prefer the freshest (lowest) value, then the centroid of that band.
+ */
+function estimateRobotFromPath(){
+  mapRobotPx = null;
+  if(!mapPixels||!mapFull.w) return;
+  const fw=mapFull.w, fh=mapFull.h, src=mapPixels;
+  let best=256, bx=-1, by=-1, n=0, sx=0, sy=0;
+  // sample for speed on large maps
+  const step = (fw*fh > 200000) ? 2 : 1;
+  // pass 1: find freshest path value present
+  for(let y=0;y<fh;y+=step){
+    const row=y*fw;
+    for(let x=0;x<fw;x+=step){
+      const v=src[row+x];
+      if(v>=0x01 && v<=0x1f && v<best) best=v;
+    }
+  }
+  if(best>0x1f) return;
+  // pass 2: centroid of pixels at freshest (and next) level for stability
+  const hi = Math.min(0x1f, best+1);
+  for(let y=0;y<fh;y+=step){
+    const row=y*fw;
+    for(let x=0;x<fw;x+=step){
+      const v=src[row+x];
+      if(v>=best && v<=hi){ sx+=x; sy+=y; n++; bx=x; by=y; }
+    }
+  }
+  if(n>0){
+    const x=sx/n, y=sy/n;
+    const loc=fullToLocal(x, y);
+    mapRobotPx = { px:loc.px+0.5, py:loc.py+0.5, conf:best, n };
+  }else if(bx>=0){
+    const loc=fullToLocal(bx, by);
+    mapRobotPx = { px:loc.px+0.5, py:loc.py+0.5, conf:best, n:1 };
+  }
+}
+
+function buildOffscreen(){
+  if(!mapMeta||!mapPixels||!mapCrop.w) return;
+  const fw=mapFull.w, {x:cx,y:cy,w,h}=mapCrop;
+  /* Downsample large maps for small screens / low-end browsers (keeps UI responsive). */
+  let step=1;
+  const pix=w*h;
+  const mobile=window.matchMedia && matchMedia('(max-width:720px), (pointer:coarse)').matches;
+  if(pix>400000 || (mobile && pix>120000)) step=2;
+  if(pix>900000 || (mobile && pix>300000)) step=3;
+  const dw=Math.max(1, Math.floor(w/step));
+  const dh=Math.max(1, Math.floor(h/step));
+  mapOff = document.createElement('canvas');
+  mapOff.width = dw; mapOff.height = dh;
+  mapOff._mapStep = step;
+  const ctx = mapOff.getContext('2d', {alpha:false});
+  const img = ctx.createImageData(dw,dh);
+  const src=mapPixels;
+  const data=img.data;
+  for(let y=0;y<dh;y++){
+    const sy=cy+y*step;
+    for(let x=0;x<dw;x++){
+      const v=src[sy*fw+(cx+x*step)];
+      const [r,g,b]=colorFor(v);
+      const o=(y*dw+x)*4;
+      data[o]=r; data[o+1]=g; data[o+2]=b; data[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+  /* Edge thicken only on small canvases (expensive on mobile). */
+  if(step===1 && dw*dh<200000){
+    try{
+      const edge=ctx.getImageData(0,0,dw,dh);
+      const d=edge.data;
+      for(let y=1;y<dh-1;y++){
+        for(let x=1;x<dw-1;x++){
+          const fi=(cy+y)*fw+(cx+x);
+          if(src[fi]!==0x00) continue;
+          const floorN =
+            src[fi-1]===0x80||src[fi+1]===0x80||src[fi-fw]===0x80||src[fi+fw]===0x80;
+          if(floorN){
+            const o=(y*dw+x)*4; d[o]=8; d[o+1]=8; d[o+2]=10;
+          }
+        }
+      }
+      ctx.putImageData(edge,0,0);
+    }catch(e){}
+  }
+  estimateRobotFromPath();
+}
+
+function drawDot(ctx, px, py, fill, ring, r){
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, Math.PI*2);
+  ctx.fillStyle=fill;
+  ctx.fill();
+  ctx.lineWidth=Math.max(1, r*0.35);
+  ctx.strokeStyle=ring||'#111';
+  ctx.stroke();
+}
+
+function mapW(){ return mapCrop.w||mapFull.w||1; }
+function mapH(){ return mapCrop.h||mapFull.h||1; }
+
+function fitBase(){
+  const wrap=$('mapwrap');
+  if(!mapMeta||!wrap) return 1;
+  const rw=wrap.clientWidth||1, rh=wrap.clientHeight||1;
+  return Math.min(rw/mapW(), rh/mapH());
+}
+
+function clampView(){
+  if(!mapMeta) return;
+  const wrap=$('mapwrap');
+  const base=fitBase();
+  const s=base*mapView.z;
+  const rw=wrap.clientWidth, rh=wrap.clientHeight;
+  const mw=mapW()*s, mh=mapH()*s;
+  if(mw>rw){ mapView.x = Math.min(40, Math.max(rw-mw-40, mapView.x)); }
+  else { mapView.x = (rw-mw)/2; }
+  if(mh>rh){ mapView.y = Math.min(40, Math.max(rh-mh-40, mapView.y)); }
+  else { mapView.y = (rh-mh)/2; }
+}
+
+function mapToScreen(px, py){
+  const base=fitBase();
+  const s=base*mapView.z;
+  return { x: mapView.x + px*s, y: mapView.y + py*s, s };
+}
+function drawMap(){
+  const c=$('mapc');
+  const wrap=$('mapwrap');
+  if(!mapMeta||!mapOff||!wrap) return;
+  const dpr=window.devicePixelRatio||1;
+  const rw=wrap.clientWidth, rh=wrap.clientHeight;
+  c.width=Math.max(1,Math.floor(rw*dpr));
+  c.height=Math.max(1,Math.floor(rh*dpr));
+  c.style.width=rw+'px';
+  c.style.height=rh+'px';
+  const ctx=c.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle='#9e9e9e';
+  ctx.fillRect(0,0,rw,rh);
+  ctx.imageSmoothingEnabled=false;
+  clampView();
+  const base=fitBase();
+  const s=base*mapView.z;
+  // map layer (map-pixel space)
+  ctx.setTransform(dpr*s, 0, 0, dpr*s, dpr*mapView.x, dpr*mapView.y);
+  ctx.fillStyle='rgba(0,0,0,0.12)';
+  ctx.fillRect(2,2,mapW(),mapH());
+  /* mapOff may be downsampled — stretch to crop pixel space */
+  ctx.drawImage(mapOff, 0, 0, mapW(), mapH());
+  // markers in SCREEN space so size is always visible (not lost after crop/zoom)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  function mark(px, py, fill, ring, r){
+    if(px==null||py==null||!isFinite(px)||!isFinite(py)) return;
+    const sc=mapToScreen(px, py);
+    drawDot(ctx, sc.x, sc.y, fill, ring, r);
+  }
+  // places: stored as miio/goto frame → convert to slam then crop px
+  if(mapPlaces && mapPlaces.length){
+    const ox = (mapMeta.goto_offset_mm && mapMeta.goto_offset_mm.x != null)
+      ? (mapMeta.goto_offset_mm.x|0) : 25500;
+    const oy = (mapMeta.goto_offset_mm && mapMeta.goto_offset_mm.y != null)
+      ? (mapMeta.goto_offset_mm.y|0) : 25500;
+    mapPlaces.forEach(pl=>{
+      if(pl.x==null||pl.y==null) return;
+      const p=slamToPixel(pl.x - ox, pl.y - oy);
+      if(p.px>=-2&&p.py>=-2&&p.px<mapW()+2&&p.py<mapH()+2){
+        mark(p.px, p.py, '#c084fc', '#2e1065', 5);
+      }
+    });
+  }
+  if(mapMeta.charger){
+    const p=slamToPixel(mapMeta.charger.x, mapMeta.charger.y);
+    mark(p.px, p.py, '#3ddc97', '#042116', 9);
+    // small “D”
+    const sc=mapToScreen(p.px,p.py);
+    ctx.fillStyle='#042116';
+    ctx.font='bold 10px system-ui,sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('D', sc.x, sc.y);
+  }
+  if(mapMeta.start){
+    const p=slamToPixel(mapMeta.start.x, mapMeta.start.y);
+    mark(p.px, p.py, '#ffb020', '#3a2800', 7);
+  }
+  // short movement trail (recent quiet-refresh positions)
+  if(mapRobotTrail && mapRobotTrail.length>1){
+    ctx.beginPath();
+    for(let i=0;i<mapRobotTrail.length;i++){
+      const sc=mapToScreen(mapRobotTrail[i].px, mapRobotTrail[i].py);
+      if(i===0) ctx.moveTo(sc.x, sc.y); else ctx.lineTo(sc.x, sc.y);
+    }
+    ctx.strokeStyle='rgba(255,100,50,0.75)';
+    ctx.lineWidth=3;
+    ctx.lineJoin='round';
+    ctx.lineCap='round';
+    ctx.stroke();
+    // fade dots along trail
+    const now=Date.now();
+    mapRobotTrail.forEach((p,i)=>{
+      const age=now-p.t;
+      const a=Math.max(0.15, 1-age/90000)*(0.35+0.65*i/mapRobotTrail.length);
+      const sc=mapToScreen(p.px, p.py);
+      ctx.beginPath();
+      ctx.arc(sc.x, sc.y, 2.5, 0, Math.PI*2);
+      ctx.fillStyle=`rgba(255,90,40,${a})`;
+      ctx.fill();
+    });
+  }
+  // robot estimate from freshest path tip
+  if(mapRobotPx){
+    const sc=mapToScreen(mapRobotPx.px, mapRobotPx.py);
+    ctx.beginPath();
+    ctx.arc(sc.x, sc.y, 14, 0, Math.PI*2);
+    ctx.fillStyle='rgba(255,80,40,0.28)';
+    ctx.fill();
+    drawDot(ctx, sc.x, sc.y, '#ff5028', '#fff', 8);
+    ctx.fillStyle='#fff';
+    ctx.font='bold 9px system-ui,sans-serif';
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillText('R', sc.x, sc.y);
+  }
+  if(mapPick){
+    const sc=mapToScreen(mapPick.px, mapPick.py);
+    ctx.beginPath();
+    ctx.arc(sc.x, sc.y, 18, 0, Math.PI*2);
+    ctx.strokeStyle='rgba(0,229,255,0.95)';
+    ctx.lineWidth=3;
+    ctx.stroke();
+    drawDot(ctx, sc.x, sc.y, '#00e5ff', '#00343a', 10);
+    ctx.beginPath();
+    ctx.moveTo(sc.x-16, sc.y); ctx.lineTo(sc.x+16, sc.y);
+    ctx.moveTo(sc.x, sc.y-16); ctx.lineTo(sc.x, sc.y+16);
+    ctx.strokeStyle='rgba(0,229,255,0.9)';
+    ctx.lineWidth=2;
+    ctx.stroke();
+  }
+  const zl=$('map-zoom-lbl');
+  if(zl) zl.textContent = Math.round(mapView.z*100)+'%';
+}
+
+function screenToMap(clientX, clientY){
+  const wrap=$('mapwrap');
+  const rect=wrap.getBoundingClientRect();
+  const sx=clientX-rect.left, sy=clientY-rect.top;
+  const base=fitBase();
+  const s=base*mapView.z;
+  return { px:(sx-mapView.x)/s, py:(sy-mapView.y)/s };
+}
+
+function zoomAt(clientX, clientY, factor){
+  if(!mapMeta) return;
+  const wrap=$('mapwrap');
+  const rect=wrap.getBoundingClientRect();
+  const sx=clientX-rect.left, sy=clientY-rect.top;
+  const base=fitBase();
+  const oldS=base*mapView.z;
+  const mx=(sx-mapView.x)/oldS;
+  const my=(sy-mapView.y)/oldS;
+  mapView.z = Math.min(12, Math.max(0.5, mapView.z*factor));
+  const newS=base*mapView.z;
+  mapView.x = sx - mx*newS;
+  mapView.y = sy - my*newS;
+  drawMap();
+}
+
+function resetView(){
+  if(!mapMeta) return;
+  mapView.z=1;
+  const wrap=$('mapwrap');
+  const base=fitBase();
+  mapView.x=(wrap.clientWidth - mapW()*base)/2;
+  mapView.y=(wrap.clientHeight - mapH()*base)/2;
+  drawMap();
+}
+
+async function refreshMap(){
+  $('map-msg').textContent='Loading map…';
+  try{
+    if(!cfg().rock) throw new Error('set robot host in Settings');
+    mapRobotTrail = [];
+    mapMeta = await rock('/api/v1/maps');
+    const mapName = (mapMeta.active || 'last_map');
+    $('map-export').href = cfg().rock + '/api/v1/maps/' + mapName;
+    const ac = (typeof AbortController!=='undefined') ? new AbortController() : null;
+    const tmo = ac ? setTimeout(()=>ac.abort(), 45000) : null;
+    let res;
+    try{
+      res = await fetch(cfg().rock + '/api/v1/maps/' + mapName + (mapName.indexOf('?')>=0?'&':'?')+'t='+Date.now(), {
+        cache:'no-store',
+        signal: ac ? ac.signal : undefined
+      });
+    }finally{ if(tmo) clearTimeout(tmo); }
+    if(!res.ok) throw new Error('map download '+res.status+' for '+mapName);
+    $('map-msg').textContent='Downloading map…';
+    const ab = await res.arrayBuffer();
+    const buf = new Uint8Array(ab);
+    if(buf.length < 50) throw new Error('map file too small ('+buf.length+' bytes)');
+    let w=mapMeta.width|0, h=mapMeta.height|0, off=mapMeta.data_offset|46;
+    if(buf[0]===0x52&&buf[1]===0x52){
+      // always trust RRSLAM header for dims
+      const dv0=new DataView(ab);
+      const wh=dv0.getInt32(0x16,true), hh=dv0.getInt32(0x1a,true);
+      if(wh>32&&wh<4096&&hh>32&&hh<4096){ w=wh; h=hh; off=46; }
+      const top=dv0.getInt32(0x0e,true), left=dv0.getInt32(0x12,true);
+      const r=mapMeta.resolution_mm||50;
+      mapMeta.map_top_cell=top; mapMeta.map_left_cell=left;
+      mapMeta.origin_mm={x:left*r, y:top*r};
+      if(!mapMeta.goto_offset_mm) mapMeta.goto_offset_mm={x:25500,y:25500};
+    }
+    if(!w||!h) throw new Error('could not read map size');
+    if(w*h + off > buf.length){
+      const pix=w*h;
+      if(pix>0 && buf.length>pix) off = buf.length-pix;
+      else throw new Error('map dimensions do not fit file');
+    }
+    mapMeta.width=w; mapMeta.height=h; mapMeta.data_offset=off;
+    mapFull={w,h};
+    mapPixels = buf.subarray(off, off+w*h);
+    computeCrop();
+    if(!mapCrop.w||!mapCrop.h) mapCrop={x:0,y:0,w:w,h:h};
+    buildOffscreen();
+    if(!mapOff) throw new Error('failed to render map canvas');
+    // keep target if still on map; else clear
+    if(mapPick){
+      if(mapPick.px<0||mapPick.py<0||mapPick.px>=mapW()||mapPick.py>=mapH())
+        clearPick();
+      else setPick(mapPick);
+    }
+    requestAnimationFrame(()=>{ resetView(); drawMap(); });
+    // places for markers
+    try{
+      const pl=await rock('/api/v1/places');
+      mapPlaces = Array.isArray(pl.places)?pl.places:(pl.list||[]);
+      if(!Array.isArray(mapPlaces) && pl && typeof pl==='object'){
+        mapPlaces = Object.keys(pl).filter(k=>pl[k]&&pl[k].x!=null).map(k=>({name:k,x:pl[k].x,y:pl[k].y}));
+      }
+    }catch(e){ mapPlaces=[]; }
+    drawMap();
+    const dockPx = mapMeta.charger ? slamToPixel(mapMeta.charger.x, mapMeta.charger.y) : null;
+    $('map-meta').innerHTML =
+      `<div><span>slot</span> ${mapName} · <span>size</span> ${mapCrop.w}×${mapCrop.h} (full ${w}×${h})</div>`+
+      (mapMeta.charger?`<div><span>dock</span> slam ${mapMeta.charger.x},${mapMeta.charger.y}`+
+        (dockPx?` · view ${dockPx.px.toFixed(0)},${dockPx.py.toFixed(0)}`:'')+`</div>`:'')+
+      (mapRobotPx?`<div><span>robot≈</span> path tip (conf ${mapRobotPx.conf})</div>`:'')+
+      `<div><span>tip</span> drag=pan · wheel/pinch=zoom · tap free floor → Summon</div>`;
+    $('map-msg').textContent= mapRobotPx
+      ? 'Map ready — orange R ≈ robot · green D = dock · tap floor for target.'
+      : 'Map ready — tap free (light) floor for Summon / Spot.';
+    refreshMapSlots();
+  }catch(e){
+    console.error(e);
+    mapOff=null; mapPixels=null;
+    $('map-msg').textContent='Map error: '+(e&&e.message?e.message:e);
+    $('map-meta').textContent='';
+  }
+}
+
+async function mapAction(body){
+  return rock('/api/v1/maps/action',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)});
+}
+
+async function refreshMapSlots(){
+  const box=$('map-slots'); if(!box) return;
+  try{
+    const j=await rock('/api/v1/maps');
+    const slots=j.maps||[];
+    const multi=j.multi_maps||[];
+    let html='';
+    if(slots.length){
+      html+='<div><span>on disk</span></div>';
+      slots.forEach(s=>{
+        const name=s.name||s;
+        const bytes=s.bytes!=null?(s.bytes/1024).toFixed(0)+'K':'';
+        const act=(j.active===name)?' · active':'';
+        html+=`<div style="display:flex;gap:.35rem;align-items:center;margin:.2rem 0">`+
+          `<span style="flex:1">${name} ${bytes}${act}</span>`+
+          `<button type="button" data-load-map="${name}">Load</button>`+
+          (name!=='last_map'?`<button type="button" class="bad" data-del-map="${name}">Delete</button>`:'')+
+          `</div>`;
+      });
+    }
+    if(multi.length){
+      html+='<div style="margin-top:.4rem"><span>firmware multi-map</span></div>';
+      multi.forEach(m=>{
+        html+=`<div>${JSON.stringify(m)}</div>`;
+      });
+    }
+    if(!html) html='<div class="hint">No map files found.</div>';
+    box.innerHTML=html;
+    box.querySelectorAll('[data-load-map]').forEach(b=>{
+      b.onclick=async()=>{
+        $('map-mgr-msg').textContent='Loading '+b.dataset.loadMap+'…';
+        try{
+          await mapAction({action:'load', name:b.dataset.loadMap});
+          $('map-mgr-msg').textContent='Loaded '+b.dataset.loadMap;
+          await refreshMap();
+        }catch(e){ $('map-mgr-msg').textContent='Load failed: '+e.message; }
+      };
+    });
+    box.querySelectorAll('[data-del-map]').forEach(b=>{
+      b.onclick=async()=>{
+        if(!confirm('Delete map slot '+b.dataset.delMap+'?')) return;
+        try{
+          await mapAction({action:'delete', name:b.dataset.delMap});
+          $('map-mgr-msg').textContent='Deleted '+b.dataset.delMap;
+          await refreshMapSlots();
+        }catch(e){ $('map-mgr-msg').textContent='Delete failed: '+e.message; }
+      };
+    });
+  }catch(e){ box.textContent='slots: '+e.message; }
+}
+
+/* RRSLAM full plane: y down. slam = origin + full_px * res.
+ * Display uses crop-local px; convert with mapCrop offset. */
+function mapRes(){ return (mapMeta&&mapMeta.resolution_mm)||50; }
+function mapOrigin(){
+  const res=mapRes();
+  if(mapMeta&&mapMeta.origin_mm) return {x:mapMeta.origin_mm.x|0, y:mapMeta.origin_mm.y|0};
+  if(mapMeta&&mapMeta.map_left_cell!=null)
+    return {x:(mapMeta.map_left_cell|0)*res, y:(mapMeta.map_top_cell|0)*res};
+  return {x:0,y:0};
+}
+function localToFull(lx, ly){
+  return { fx: lx + (mapCrop.x||0), fy: ly + (mapCrop.y||0) };
+}
+function fullToLocal(fx, fy){
+  return { px: fx - (mapCrop.x||0), py: fy - (mapCrop.y||0) };
+}
+/** Full-map pixel from slam (before crop). */
+function slamToPixelFull(sx, sy){
+  const res=mapRes(), o=mapOrigin();
+  return { px:(sx - o.x)/res, py:(sy - o.y)/res };
+}
+/** Crop-local pixel for drawing. */
+function slamToPixel(sx, sy){
+  const f=slamToPixelFull(sx, sy);
+  return fullToLocal(f.px, f.py);
+}
+/** Crop-local px → slam mm. */
+function mapToSlamMm(lx, ly){
+  const res=mapRes(), o=mapOrigin();
+  const {fx,fy}=localToFull(lx, ly);
+  return { x:Math.round(o.x + fx*res), y:Math.round(o.y + fy*res) };
+}
+/* app_goto_target needs miio frame = SLAM + goto_offset (default 25500). */
+function slamToGoto(slam){
+  const ox=(mapMeta&&mapMeta.goto_offset_mm&&mapMeta.goto_offset_mm.x!=null)
+    ? (mapMeta.goto_offset_mm.x|0) : 25500;
+  const oy=(mapMeta&&mapMeta.goto_offset_mm&&mapMeta.goto_offset_mm.y!=null)
+    ? (mapMeta.goto_offset_mm.y|0) : 25500;
+  return { x: slam.x + ox, y: slam.y + oy };
+}
+function pixelWalkable(lx, ly){
+  if(!mapPixels||!mapMeta) return true;
+  const {fx,fy}=localToFull(Math.floor(lx), Math.floor(ly));
+  const w=mapFull.w|0, h=mapFull.h|0;
+  if(fx<0||fy<0||fx>=w||fy>=h) return false;
+  const v=mapPixels[fy*w+fx];
+  if(v===0x00) return false;
+  return true;
+}
+function setPick(pick){
+  mapPick=pick;
+  const en=!!pick;
+  ['map-summon','map-spot','map-save','map-clear'].forEach(id=>{
+    const b=$(id); if(b) b.disabled=!en;
+  });
+  const sel=$('map-sel');
+  if(sel){
+    if(!pick) sel.textContent='Tap free floor to place a target';
+    else {
+      const wall=pick.onWall?' · wall?':'';
+      sel.textContent=`Target  goto ${pick.goto.x},${pick.goto.y}${wall}`;
+    }
+  }
+  drawMap();
+}
+function clearPick(){
+  mapPick=null;
+  ['map-summon','map-spot','map-save','map-clear'].forEach(id=>{
+    const b=$(id); if(b) b.disabled=true;
+  });
+  const sel=$('map-sel');
+  if(sel) sel.textContent='Tap free floor to place a target';
+}
+function pickAtScreen(clientX, clientY){
+  if(!mapMeta||!mapOff) return null;
+  const {px,py}=screenToMap(clientX, clientY);
+  // must be inside cropped map
+  if(px<0||py<0||px>=mapW()||py>=mapH()){
+    $('map-msg').textContent='Click inside the floor plan.';
+    return null;
+  }
+  const onWall=!pixelWalkable(px, py);
+  const slam=mapToSlamMm(px, py);
+  const go=slamToGoto(slam);
+  return { px, py, slam, goto: go, onWall };
+}
+async function doSummonGoto(g){
+  if(!g) return;
+  $('map-msg').textContent=`Summon → (${g.x}, ${g.y})…`;
+  try{
+    await rock('/api/v1/goto',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({x:g.x,y:g.y})});
+    $('map-msg').textContent=`Summoning to ${g.x}, ${g.y} (drive only).`;
+    setTimeout(refreshStatus,800);
+  }catch(e){
+    $('map-msg').textContent='Goto failed: '+e.message+' — try Dock first if mid-clean.';
+  }
+}
+async function doSpotClean(g){
+  if(!g) return;
+  $('map-msg').textContent=`Spot zone around (${g.x}, ${g.y})…`;
+  try{
+    await rock('/api/v1/zone_clean',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({x:g.x,y:g.y,size_mm:1500,repeats:1})});
+    $('map-msg').textContent=`Spot clean started (~1.5 m box at ${g.x},${g.y}).`;
+    setTimeout(refreshStatus,800);
+  }catch(e){
+    // fallback: spot mode at current robot (no zone) after goto
+    try{
+      await doSummonGoto(g);
+      await rock('/api/v1/control',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'spot'})});
+      $('map-msg').textContent='Zone API missing — summoned + spot mode.';
+    }catch(e2){
+      $('map-msg').textContent='Spot failed: '+e.message;
+    }
+  }
+}
+async function savePlaceAt(g){
+  if(!g) return;
+  const name=prompt('Place name (key, e.g. work_room):','spot');
+  if(!name) return;
+  try{
+    const r=await fetch(cfg().rock+'/api/v1/places',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,x:g.x,y:g.y,label:name})
+    });
+    if(r.ok){
+      $('map-msg').textContent=`Saved place "${name}" → ${g.x},${g.y}`;
+      return;
+    }
+  }catch(e){}
+  $('map-msg').textContent=`Save offline: rockctl place set ${name} ${g.x} ${g.y}`;
+}
+
+const mapcEl = $('mapc');
+const mapwrapEl = $('mapwrap');
+const TAP_SLOP = 14; // px — touch jitter must not cancel target place
+let mapSuppressClick = false; // true after a pan so click doesn't re-fire
+
+function placeTargetAt(clientX, clientY){
+  try{
+    const pick=pickAtScreen(clientX, clientY);
+    if(!pick) return false;
+    setPick(pick);
+    $('map-msg').textContent = pick.onWall
+      ? 'Target on wall/obstacle — prefer free (light) floor.'
+      : 'Target set — press Summon or Spot clean.';
+    return true;
+  }catch(e){
+    $('map-msg').textContent='Pick error: '+(e&&e.message?e.message:e);
+    return false;
+  }
+}
+
+mapcEl.addEventListener('wheel', (ev)=>{
+  if(!mapMeta) return;
+  ev.preventDefault();
+  const f = ev.deltaY > 0 ? 0.9 : 1.12;
+  zoomAt(ev.clientX, ev.clientY, f);
+}, {passive:false});
+
+mapcEl.addEventListener('pointerdown', (ev)=>{
+  if(!mapMeta) return;
+  if(ev.pointerType==='touch' && mapPinch) return;
+  mapSuppressClick = false;
+  try{ mapcEl.setPointerCapture(ev.pointerId); }catch(e){}
+  mapDrag = {
+    x0:ev.clientX, y0:ev.clientY,
+    vx:mapView.x, vy:mapView.y,
+    moved:false, id:ev.pointerId
+  };
+  mapcEl.classList.add('dragging');
+});
+
+mapcEl.addEventListener('pointermove', (ev)=>{
+  if(!mapDrag || mapDrag.id!==ev.pointerId) return;
+  const dx=ev.clientX-mapDrag.x0, dy=ev.clientY-mapDrag.y0;
+  if(Math.hypot(dx,dy)>TAP_SLOP) mapDrag.moved=true;
+  if(mapDrag.moved){
+    mapView.x = mapDrag.vx + dx;
+    mapView.y = mapDrag.vy + dy;
+    drawMap();
+  }
+});
+
+function endDrag(ev){
+  if(!mapDrag || mapDrag.id!==ev.pointerId) return;
+  const moved=mapDrag.moved;
+  const x=ev.clientX, y=ev.clientY;
+  mapDrag=null;
+  mapcEl.classList.remove('dragging');
+  try{ mapcEl.releasePointerCapture(ev.pointerId); }catch(e){}
+  if(moved){
+    mapSuppressClick = true; // pan → ignore following click
+    return;
+  }
+  placeTargetAt(x, y);
+  mapSuppressClick = true; // pointerup already placed; skip duplicate click
+}
+mapcEl.addEventListener('pointerup', endDrag);
+mapcEl.addEventListener('pointercancel', ()=>{
+  mapDrag=null;
+  mapcEl.classList.remove('dragging');
+});
+// Fallback when pointerup is lost (some WebViews)
+mapcEl.addEventListener('click', (ev)=>{
+  if(!mapMeta) return;
+  if(mapSuppressClick){ mapSuppressClick=false; return; }
+  placeTargetAt(ev.clientX, ev.clientY);
+});
+if($('map-summon')) $('map-summon').onclick=()=>{
+  if(!mapPick){ $('map-msg').textContent='Tap the map first.'; return; }
+  doSummonGoto(mapPick.goto);
+};
+if($('map-spot')) $('map-spot').onclick=()=>{
+  if(!mapPick){ $('map-msg').textContent='Tap the map first.'; return; }
+  doSpotClean(mapPick.goto);
+};
+if($('map-save')) $('map-save').onclick=()=>{ if(mapPick) savePlaceAt(mapPick.goto); };
+if($('map-clear')) $('map-clear').onclick=()=>{ clearPick(); $('map-msg').textContent='Target cleared.'; };
+
+// pinch zoom
+mapwrapEl.addEventListener('touchstart', (ev)=>{
+  if(ev.touches.length===2){
+    const a=ev.touches[0], b=ev.touches[1];
+    mapPinch={
+      dist:Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY),
+      z:mapView.z,
+      cx:(a.clientX+b.clientX)/2,
+      cy:(a.clientY+b.clientY)/2
+    };
+    mapDrag=null;
+  }
+},{passive:true});
+mapwrapEl.addEventListener('touchmove', (ev)=>{
+  if(ev.touches.length===2 && mapPinch){
+    ev.preventDefault();
+    const a=ev.touches[0], b=ev.touches[1];
+    const dist=Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY);
+    const factor = dist / (mapPinch.dist||1);
+    const targetZ = Math.min(12, Math.max(0.4, mapPinch.z * factor));
+    const f = targetZ / mapView.z;
+    zoomAt(mapPinch.cx, mapPinch.cy, f);
+  }
+},{passive:false});
+mapwrapEl.addEventListener('touchend', (ev)=>{ if(ev.touches.length<2) mapPinch=null; });
+mapwrapEl.addEventListener('touchcancel', ()=>{ mapPinch=null; });
+
+$('map-zin').onclick=()=>{
+  const r=$('mapwrap').getBoundingClientRect();
+  zoomAt(r.left+r.width/2, r.top+r.height/2, 1.25);
+};
+$('map-zout').onclick=()=>{
+  const r=$('mapwrap').getBoundingClientRect();
+  zoomAt(r.left+r.width/2, r.top+r.height/2, 0.8);
+};
+$('map-zreset').onclick=()=>resetView();
+if($('map-center-dock')) $('map-center-dock').onclick=()=>{
+  if(!mapMeta||!mapMeta.charger){ $('map-msg').textContent='No dock on map.'; return; }
+  const p=slamToPixel(mapMeta.charger.x, mapMeta.charger.y);
+  centerOnCropPx(p.px, p.py, Math.max(mapView.z, 2));
+  $('map-msg').textContent='Centered on dock.';
+};
+if($('map-center-robot')) $('map-center-robot').onclick=()=>{
+  if(!mapRobotPx){ $('map-msg').textContent='No robot estimate (no path trail yet).'; return; }
+  centerOnCropPx(mapRobotPx.px, mapRobotPx.py, Math.max(mapView.z, 2.5));
+  $('map-msg').textContent='Centered on path tip (≈ robot).';
+};
+if($('map-follow')) $('map-follow').onclick=()=>{
+  mapFollowRobot = !mapFollowRobot;
+  $('map-follow').classList.toggle('on', mapFollowRobot);
+  $('map-follow').classList.toggle('primary', mapFollowRobot);
+  if(mapFollowRobot && mapRobotPx)
+    centerOnCropPx(mapRobotPx.px, mapRobotPx.py, Math.max(mapView.z, 2));
+  updateMapLiveLabel();
+};
+$('map-refresh').onclick=()=>{ mapRobotTrail=[]; refreshMap(); };
+window.addEventListener('resize', ()=>{ if(mapOff) drawMap(); });
+if($('map-mgr-refresh')) $('map-mgr-refresh').onclick=()=>refreshMapSlots();
+if($('map-start-mapping')) $('map-start-mapping').onclick=async()=>{
+  $('map-mgr-msg').textContent='Starting mapping (reset + clean/explore)…';
+  try{
+    const r=await mapAction({action:'start_mapping'});
+    $('map-mgr-msg').textContent=r.message||'Mapping started — robot should explore. Refresh map periodically.';
+  }catch(e){ $('map-mgr-msg').textContent='Start mapping failed: '+e.message; }
+};
+if($('map-stop-mapping')) $('map-stop-mapping').onclick=async()=>{
+  try{
+    await mapAction({action:'stop'});
+    $('map-mgr-msg').textContent='Stop sent.';
+    setTimeout(refreshMap, 1500);
+  }catch(e){ $('map-mgr-msg').textContent='Stop failed: '+e.message; }
+};
+if($('map-save-slot')) $('map-save-slot').onclick=async()=>{
+  const name=prompt('Save current map as slot name (e.g. user_map1 or home):','user_map1');
+  if(!name) return;
+  $('map-mgr-msg').textContent='Saving…';
+  try{
+    await mapAction({action:'save', name});
+    $('map-mgr-msg').textContent='Saved as '+name;
+    await refreshMapSlots();
+  }catch(e){ $('map-mgr-msg').textContent='Save failed: '+e.message; }
+};
+
+/* ----- MUSIC (manage library · rename/delete current · upload limits) ----- */
+const MUSIC_MAX_DEFAULT = 3 * 1024 * 1024; // match rockctl ROCK_HTTP_MAX_BODY (3 MB WAV)
+let musicState = { current: '', tracks: [], maxBytes: MUSIC_MAX_DEFAULT, formats: ['wav'] };
+
+function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function safeWavName(name){
+  let n = String(name||'').trim().replace(/[^a-zA-Z0-9._-]/g,'_');
+  if(!n) n = 'track.wav';
+  if(!/\.wav$/i.test(n)) n += '.wav';
+  if(n.length > 80) n = n.slice(0,76) + '.wav';
+  return n;
+}
+async function musicPut(body){
+  return rock('/api/v1/music',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)});
+}
+async function musicDeleteTrack(name){
+  const r=await fetch(cfg().rock+'/api/v1/music/tracks/'+encodeURIComponent(name),{method:'DELETE'});
+  const t=await r.text();
+  let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
+  if(!r.ok) throw new Error(j.error||t||r.status);
+  return j;
+}
+async function musicRenameTrack(from, to){
+  const r=await fetch(cfg().rock+'/api/v1/music/tracks/'+encodeURIComponent(from),{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({new_name:to})
+  });
+  const t=await r.text();
+  let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
+  if(!r.ok) throw new Error(j.error||t||r.status);
+  return j;
+}
+function updateMusicLimitsUi(){
+  const el=$('music-limits');
+  if(!el) return;
+  const mb=(musicState.maxBytes/1024/1024).toFixed(2);
+  const fmt=(musicState.formats||['wav']).join(', ').toUpperCase();
+  el.innerHTML = `Format: <b>${esc(fmt)}</b> only · max <b>${mb} MB</b> per file · stored on robot`;
+}
+function fillCurrentEditor(j){
+  const cur = j.current || '';
+  musicState.current = cur;
+  const lab=$('music-cur-label');
+  const inp=$('music-cur-name');
+  if(lab){
+    if(!cur) lab.innerHTML='<span class="mut">Nothing selected — pick a track or upload.</span>';
+    else {
+      const t=(j.tracks||[]).find(x=>x.name===cur);
+      const kb=t&&t.bytes!=null?(t.bytes/1024).toFixed(0)+' KB':'';
+      lab.innerHTML=`<div><span>selected</span> <b>${esc(cur)}</b>${kb?(' · '+kb):''}</div>`+
+        `<div><span>playing</span> ${j.playing?'yes':'no'}</div>`;
+    }
+  }
+  if(inp){
+    inp.value = cur || '';
+    inp.disabled = !cur;
+  }
+  const ren=$('music-cur-rename'), del=$('music-cur-delete');
+  if(ren) ren.disabled = !cur;
+  if(del) del.disabled = !cur;
+}
+async function refreshMusic(){
+  try{
+    const j=await rock('/api/v1/music');
+    const tracks=j.tracks||[];
+    musicState.tracks = tracks;
+    if(j.limits){
+      if(j.limits.max_upload_bytes) musicState.maxBytes = j.limits.max_upload_bytes;
+      if(j.limits.formats) musicState.formats = j.limits.formats;
+    }
+    updateMusicLimitsUi();
+    $('music-st').innerHTML =
+      `<div><span>when</span> ${esc(j.mode)} · <span>playback</span> ${esc(j.play_mode||'loop')}</div>`+
+      `<div><span>playing</span> ${j.playing?'yes':'no'} · <span>tracks</span> ${tracks.length}</div>`;
+    document.querySelectorAll('[data-mmode]').forEach(b=>{
+      b.classList.toggle('on', b.dataset.mmode===j.mode || (j.mode==='always'&&b.dataset.mmode==='on'));
+    });
+    document.querySelectorAll('[data-pmode]').forEach(b=>{
+      b.classList.toggle('on', b.dataset.pmode===(j.play_mode||'loop'));
+    });
+    fillCurrentEditor(j);
+    const box=$('music-tracks');
+    if(!tracks.length){
+      box.innerHTML='<div class="hint">Library empty — upload a WAV (see limits below).</div>';
+    }else{
+      box.innerHTML = tracks.map(t=>{
+        const on = t.name===j.current;
+        const kb = t.bytes!=null ? (t.bytes/1024).toFixed(0)+'K' : '';
+        return `<div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin:.35rem 0;padding:.35rem 0;border-bottom:1px solid var(--line)">`+
+          `<button type="button" data-track="${esc(t.name)}" class="${on?'on primary':''}" style="flex:1;min-width:8rem;text-align:left">`+
+          `${on?'▶ ':''}${esc(t.name)} <span style="color:var(--mut)">${kb}</span></button>`+
+          `<button type="button" data-edit-track="${esc(t.name)}" title="Edit name">Edit</button>`+
+          `<button type="button" data-del-track="${esc(t.name)}" class="bad" title="Delete from robot">Delete</button></div>`;
+      }).join('');
+      box.querySelectorAll('[data-track]').forEach(b=>{
+        b.onclick=async()=>{
+          try{
+            await musicPut({track:b.dataset.track});
+            await refreshMusic();
+          }catch(e){ alert('select: '+e.message); }
+        };
+      });
+      box.querySelectorAll('[data-edit-track]').forEach(b=>{
+        b.onclick=async()=>{
+          const from=b.dataset.editTrack;
+          const to=prompt('Rename on robot (must end in .wav)', from);
+          if(to==null) return;
+          const safe=safeWavName(to);
+          if(safe===from) return;
+          try{
+            await musicRenameTrack(from, safe);
+            await refreshMusic();
+            const m=$('music-cur-msg'); if(m) m.textContent='Renamed to '+safe;
+          }catch(e){ alert('rename: '+e.message); }
+        };
+      });
+      box.querySelectorAll('[data-del-track]').forEach(b=>{
+        b.onclick=async()=>{
+          if(!confirm('Delete “'+b.dataset.delTrack+'” from the robot?')) return;
+          try{
+            await musicDeleteTrack(b.dataset.delTrack);
+            await refreshMusic();
+          }catch(e){ alert('delete: '+e.message); }
+        };
+      });
+    }
+  }catch(e){ $('music-st').textContent='music: '+e.message; }
+}
+async function setMusicMode(mode){
+  try{ await musicPut({mode}); await refreshMusic(); }
+  catch(e){ alert('music mode: '+e.message); }
+}
+async function setPlayMode(pm){
+  try{ await musicPut({play_mode:pm}); await refreshMusic(); }
+  catch(e){ alert('play mode: '+e.message); }
+}
+document.querySelectorAll('[data-mmode]').forEach(b=>b.onclick=()=>setMusicMode(b.dataset.mmode));
+document.querySelectorAll('[data-pmode]').forEach(b=>b.onclick=()=>setPlayMode(b.dataset.pmode));
+$('music-play').onclick=async()=>{
+  try{ await musicPut({action:'play', mode:'on'}); await refreshMusic(); }
+  catch(e){ alert(e.message); }
+};
+$('music-stop').onclick=async()=>{
+  try{ await musicPut({mode:'off'}); await refreshMusic(); }
+  catch(e){ alert(e.message); }
+};
+$('music-next').onclick=async()=>{
+  try{ await musicPut({action:'next'}); await refreshMusic(); }
+  catch(e){ alert(e.message); }
+};
+$('music-refresh').onclick=()=>refreshMusic();
+
+if($('music-cur-rename')) $('music-cur-rename').onclick=async()=>{
+  const from = musicState.current;
+  const msg=$('music-cur-msg');
+  if(!from){ if(msg) msg.textContent='No track selected.'; return; }
+  const to = safeWavName(($('music-cur-name')&&$('music-cur-name').value)||'');
+  if(!to){ if(msg) msg.textContent='Enter a .wav name.'; return; }
+  if(to===from){ if(msg) msg.textContent='Name unchanged.'; return; }
+  try{
+    await musicRenameTrack(from, to);
+    if(msg) msg.textContent='Saved as '+to;
+    await refreshMusic();
+  }catch(e){ if(msg) msg.textContent='Rename failed: '+e.message; }
+};
+if($('music-cur-delete')) $('music-cur-delete').onclick=async()=>{
+  const name = musicState.current;
+  const msg=$('music-cur-msg');
+  if(!name){ if(msg) msg.textContent='No track selected.'; return; }
+  if(!confirm('Delete “'+name+'” from the robot permanently?')) return;
+  try{
+    await musicDeleteTrack(name);
+    if(msg) msg.textContent='Deleted '+name;
+    await refreshMusic();
+  }catch(e){ if(msg) msg.textContent='Delete failed: '+e.message; }
+};
+
+$('music-upload').onclick=async()=>{
+  const inp=$('music-file');
+  const f=inp&&inp.files&&inp.files[0];
+  const msg=$('music-up-msg');
+  if(!f){ msg.textContent='Choose a .wav file first.'; return; }
+  const maxB = musicState.maxBytes || MUSIC_MAX_DEFAULT;
+  const name=safeWavName(f.name);
+  const lower=(f.name||'').toLowerCase();
+  if(!lower.endsWith('.wav') && f.type && !/wav|wave/i.test(f.type)){
+    msg.textContent='Only WAV format is allowed.';
+    return;
+  }
+  if(f.size < 44){ msg.textContent='File too small to be a WAV.'; return; }
+  if(f.size > maxB){
+    msg.textContent=`Too large: ${(f.size/1024).toFixed(0)} KB (max ${(maxB/1024).toFixed(0)} KB).`;
+    return;
+  }
+  msg.textContent=`Checking ${name}…`;
+  try{
+    const head=new Uint8Array(await f.slice(0,12).arrayBuffer());
+    const riff=String.fromCharCode(...head.slice(0,4));
+    const wave=String.fromCharCode(...head.slice(8,12));
+    if(riff!=='RIFF'||wave!=='WAVE'){
+      msg.textContent='Not a valid WAV (missing RIFF/WAVE header).';
+      return;
+    }
+    msg.textContent=`Uploading ${name} (${(f.size/1024).toFixed(0)} KB)…`;
+    const buf=await f.arrayBuffer();
+    const r=await fetch(cfg().rock+'/api/v1/music/upload?name='+encodeURIComponent(name),{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/octet-stream',
+        'X-Filename': name
+      },
+      body:buf
+    });
+    const t=await r.text();
+    let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
+    if(!r.ok) throw new Error(j.error||t||r.status);
+    await musicPut({track:name});
+    msg.textContent=`Uploaded & selected ${name} (${j.bytes||f.size} bytes).`;
+    inp.value='';
+    await refreshMusic();
+  }catch(e){ msg.textContent='Upload failed: '+e.message; }
+};
+
+/* ----- cleaning schedule (robot-side, rockctl) ----- */
+let schedJobs = [];
+const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function pad2(n){ return (n<10?'0':'')+n; }
+
+/** Parse robot dow string ("1-5", "0,6", "") → Set of 0..6. Empty = every day. */
+function parseDow(s){
+  const set = new Set();
+  if(!s || !String(s).trim()){ for(let i=0;i<7;i++) set.add(i); return set; }
+  String(s).split(',').forEach(part=>{
+    part=part.trim(); if(!part) return;
+    const m=part.match(/^(\d)\s*-\s*(\d)$/);
+    if(m){ let a=+m[1], b=+m[2]; if(a>b){[a,b]=[b,a];} for(let d=a;d<=b;d++) if(d>=0&&d<=6) set.add(d); }
+    else { const d=parseInt(part,10); if(d>=0&&d<=6) set.add(d); }
+  });
+  return set;
+}
+/** Compact Set → robot dow ("" = every day, "1-5", "0,6", …). */
+function formatDow(set){
+  if(!set || set.size===0 || set.size===7) return '';
+  const arr=[...set].sort((a,b)=>a-b);
+  // weekdays / weekend shortcuts
+  if(arr.length===5 && arr.join(',')==='1,2,3,4,5') return '1-5';
+  if(arr.length===2 && arr.join(',')==='0,6') return '0,6';
+  // collapse ranges
+  const parts=[];
+  let i=0;
+  while(i<arr.length){
+    let j=i;
+    while(j+1<arr.length && arr[j+1]===arr[j]+1) j++;
+    if(j>i) parts.push(arr[i]+'-'+arr[j]); else parts.push(String(arr[i]));
+    i=j+1;
+  }
+  return parts.join(',');
+}
+function daysLabel(dow){
+  const set=parseDow(dow);
+  if(set.size===7) return 'Every day';
+  if(set.size===5 && [...set].sort().join(',')==='1,2,3,4,5') return 'Weekdays';
+  if(set.size===2 && set.has(0)&&set.has(6)) return 'Weekend';
+  return [...set].sort((a,b)=>a-b).map(d=>DAY_NAMES[d]).join(', ');
+}
+function schedLabel(j){
+  const t = pad2(j.hh|0)+':'+pad2(j.mm|0);
+  return t+' · '+daysLabel(j.dow)+' · '+(j.type==='spot'?'Spot':'Auto')+
+    ' ×'+(j.cycles||1)+' · '+(j.fan||'balanced')+' / '+(j.water||'off');
+}
+function setDayChips(set){
+  document.querySelectorAll('#sched-days button').forEach(b=>{
+    const d=+b.dataset.d;
+    b.classList.toggle('on', set.has(d));
+  });
+}
+function getDayChips(){
+  const set=new Set();
+  document.querySelectorAll('#sched-days button.on').forEach(b=>set.add(+b.dataset.d));
+  return set;
+}
+document.querySelectorAll('#sched-days button').forEach(b=>{
+  b.onclick=()=>b.classList.toggle('on');
+});
+document.querySelectorAll('[data-sched-preset]').forEach(b=>{
+  b.onclick=()=>{
+    const p=b.dataset.schedPreset;
+    if(p==='weekdays') setDayChips(new Set([1,2,3,4,5]));
+    else if(p==='weekend') setDayChips(new Set([0,6]));
+    else setDayChips(new Set([0,1,2,3,4,5,6]));
+  };
+});
+
+async function loadSchedule(){
+  const list=$('sched-list'), msg=$('sched-msg');
+  if(!list) return;
+  try{
+    const j=await rock('/api/v1/schedule');
+    schedJobs = Array.isArray(j.jobs) ? j.jobs : [];
+    if(!schedJobs.length){
+      list.innerHTML='<div class="sched-empty"><b>No scheduled cleans</b>Add one below — times use the robot’s clock.</div>';
+    }else{
+      list.innerHTML = schedJobs.map((job,i)=>{
+        const on = job.enabled!==false;
+        return `<div class="sched-job${on?'':' off'}">`+
+          `<div class="sj-time">${esc(pad2(job.hh|0)+':'+pad2(job.mm|0))}</div>`+
+          `<div class="sj-body"><div class="sj-title">${esc(daysLabel(job.dow))} · ${job.type==='spot'?'Spot':'Auto clean'}</div>`+
+          `<div class="sj-meta">${esc((job.fan||'balanced')+' suction · mop '+(job.water||'off')+' · '+(job.cycles||1)+'×')}${on?'':' · paused'}</div></div>`+
+          `<div class="sj-acts">`+
+          `<button type="button" data-sched-edit="${i}">Edit</button>`+
+          `<button type="button" data-sched-tog="${i}">${on?'Pause':'Enable'}</button>`+
+          `<button type="button" class="bad" data-sched-del="${i}">Delete</button></div></div>`;
+      }).join('');
+      list.querySelectorAll('[data-sched-edit]').forEach(b=>{
+        b.onclick=()=>{
+          fillSchedForm(schedJobs[+b.dataset.schedEdit]);
+          const card=$('sched-form-card');
+          if(card){ card.classList.add('editing'); card.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+        };
+      });
+      list.querySelectorAll('[data-sched-tog]').forEach(b=>{
+        b.onclick=async()=>{
+          const i=+b.dataset.schedTog;
+          schedJobs[i].enabled = !(schedJobs[i].enabled!==false);
+          await saveSchedJobs();
+        };
+      });
+      list.querySelectorAll('[data-sched-del]').forEach(b=>{
+        b.onclick=async()=>{
+          if(!confirm('Delete this scheduled clean?')) return;
+          schedJobs.splice(+b.dataset.schedDel,1);
+          await saveSchedJobs();
+        };
+      });
+    }
+    if(msg) msg.textContent = schedJobs.length ? (schedJobs.length+' job(s) on robot') : '';
+  }catch(e){
+    list.innerHTML='<div class="hint">schedule: '+esc(e.message)+'</div>';
+  }
+}
+function fillSchedForm(job){
+  if(!job) return;
+  if($('sched-id')) $('sched-id').value = job.id||'';
+  if($('sched-time')) $('sched-time').value = pad2(job.hh!=null?job.hh:9)+':'+pad2(job.mm!=null?job.mm:0);
+  setDayChips(parseDow(job.dow||''));
+  if($('sched-type')) $('sched-type').value = job.type||'auto';
+  if($('sched-cycles')) $('sched-cycles').value = job.cycles||1;
+  if($('sched-fan')) $('sched-fan').value = job.fan||'balanced';
+  if($('sched-water')) $('sched-water').value = job.water||'off';
+  if($('sched-en')) $('sched-en').checked = job.enabled!==false;
+  if($('sched-form-title')) $('sched-form-title').textContent='Edit cleaning';
+  const msg=$('sched-msg'); if(msg) msg.textContent='Editing '+ (job.id||'job');
+}
+function clearSchedForm(){
+  if($('sched-id')) $('sched-id').value='';
+  if($('sched-time')) $('sched-time').value='09:00';
+  setDayChips(new Set([1,2,3,4,5]));
+  if($('sched-type')) $('sched-type').value='auto';
+  if($('sched-cycles')) $('sched-cycles').value=1;
+  if($('sched-fan')) $('sched-fan').value='balanced';
+  if($('sched-water')) $('sched-water').value='off';
+  if($('sched-en')) $('sched-en').checked=true;
+  if($('sched-form-title')) $('sched-form-title').textContent='Add cleaning';
+  const card=$('sched-form-card'); if(card) card.classList.remove('editing');
+  const msg=$('sched-msg'); if(msg) msg.textContent='New job';
+}
+function readSchedForm(){
+  let id=($('sched-id')&&$('sched-id').value.trim())||'';
+  if(!id) id='job'+Date.now().toString(36).slice(-6);
+  let hh=9, mm=0;
+  const tv=$('sched-time')&&$('sched-time').value;
+  if(tv && tv.includes(':')){ const p=tv.split(':'); hh=parseInt(p[0],10); mm=parseInt(p[1],10); }
+  if(isNaN(hh)) hh=9; if(isNaN(mm)) mm=0;
+  let cycles=parseInt($('sched-cycles')&&$('sched-cycles').value,10); if(!cycles||cycles<1) cycles=1; if(cycles>3) cycles=3;
+  hh=Math.max(0,Math.min(23,hh));
+  mm=Math.max(0,Math.min(59,mm));
+  return {
+    id,
+    enabled: !($('sched-en')&&!$('sched-en').checked),
+    hh, mm,
+    dow: formatDow(getDayChips()),
+    type: ($('sched-type')&&$('sched-type').value)||'auto',
+    cycles,
+    fan: ($('sched-fan')&&$('sched-fan').value)||'balanced',
+    water: ($('sched-water')&&$('sched-water').value)||'off'
+  };
+}
+async function saveSchedJobs(){
+  const body={ok:true, jobs:schedJobs};
+  await rock('/api/v1/schedule',{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+  await loadSchedule();
+}
+if($('sched-save')) $('sched-save').onclick=async()=>{
+  const msg=$('sched-msg');
+  try{
+    const job=readSchedForm();
+    if(!getDayChips().size){ if(msg) msg.textContent='Pick at least one day'; return; }
+    const i=schedJobs.findIndex(j=>j.id===job.id);
+    if(i>=0) schedJobs[i]=job; else schedJobs.push(job);
+    await saveSchedJobs();
+    if(msg) msg.textContent='Saved · '+schedLabel(job);
+    clearSchedForm();
+  }catch(e){ if(msg) msg.textContent='Save failed: '+e.message; }
+};
+if($('sched-clear-form')) $('sched-clear-form').onclick=()=>clearSchedForm();
+if($('sched-refresh')) $('sched-refresh').onclick=()=>loadSchedule();
+if($('sched-clear-all')) $('sched-clear-all').onclick=async()=>{
+  if(!confirm('Remove all cleaning schedule jobs on the robot?')) return;
+  try{
+    await fetch(cfg().rock+'/api/v1/schedule',{method:'DELETE'});
+    schedJobs=[];
+    await loadSchedule();
+    const msg=$('sched-msg'); if(msg) msg.textContent='All jobs cleared';
+  }catch(e){ alert(e.message); }
+};
+/* default day chips on first load */
+setDayChips(new Set([1,2,3,4,5]));
+
+/* ----- settings ----- */
+function fillCfg(){
+  const c=cfg();
+  if($('cfg-host')) $('cfg-host').value=c.host||'';
+  if($('cfg-rock-port')) $('cfg-rock-port').value=c.rockPort||8080;
+  if($('cfg-assist-port')) $('cfg-assist-port').value=c.assistPort||8787;
+  /* Form shows durable localStorage token only — not ?token= session value */
+  const durable=(migrateCfg(loadCfg()).mcpToken)||'';
+  if($('cfg-mcp-token')) $('cfg-mcp-token').value=durable;
+  updateDerivedCfg();
+  updateAssistHint();
+  updateAssistOpenLink();
+}
+function readCfgForm(){
+  let host=($('cfg-host')&&$('cfg-host').value.trim())||'';
+  if(host.includes('://')) host=parseHostPort(host).host;
+  let rockPort=parseInt($('cfg-rock-port')&&$('cfg-rock-port').value,10);
+  let assistPort=parseInt($('cfg-assist-port')&&$('cfg-assist-port').value,10);
+  if(!rockPort) rockPort=8080;
+  if(!assistPort) assistPort=8787;
+  const prev=cfg();
+  const prevDurable=migrateCfg(loadCfg());
+  return {
+    host,
+    rockPort,
+    assistPort,
+    /* MCP chat on/off lives on Assistant tab */
+    mcpEnabled: prev.mcpEnabled !== false && prev.mcpMode !== 'off',
+    /* only form / prior localStorage — never session qs token */
+    mcpToken: ($('cfg-mcp-token')&&$('cfg-mcp-token').value.trim()) || prevDurable.mcpToken || '',
+    mcpMode: (prev.mcpMode && prev.mcpMode !== 'off') ? prev.mcpMode : (prev.mcpEnabled===false ? 'off' : 'peer')
+  };
+}
+function updateAssistHint(){
+  const c=cfg();
+  const el=$('assist-hint');
+  if(!el) return;
+  if(!c.host) el.textContent='Set robot host in Settings first.';
+  else if(c.mcpMode==='off'||!c.mcpEnabled)
+    el.textContent='MCP chat is off — toggle it on to use the composer. Assist process is separate.';
+  else el.textContent='Assist peer → '+c.nano+'/peer/v1/prompt'+(c.mcpToken?' · token set':'')+'. Web UI for Grok login & advanced settings.';
+}
+function updateAssistOpenLink(){
+  const a=$('assist-open-ui');
+  if(!a) return;
+  const c=cfg();
+  if(c.nano){
+    a.href=c.nano+'/';
+    a.classList.remove('disabled');
+  }else{
+    a.href='#';
+    a.onclick=e=>{ e.preventDefault(); alert('Set robot host in Settings first'); };
+  }
+}
+if($('cfg-mcp-showtok')) $('cfg-mcp-showtok').onchange=()=>{
+  if($('cfg-mcp-token'))
+    $('cfg-mcp-token').type = $('cfg-mcp-showtok').checked ? 'text' : 'password';
+};
+
+/* ----- Assistant tab: service toggles + open Web UI ----- */
+let assistSvc = { assist:false, ui:false, mcp:true };
+
+function paintAssistToggles(){
+  const setBtn=(id, on, labelOn, labelOff)=>{
+    const b=$(id); if(!b) return;
+    b.textContent = on ? labelOn : labelOff;
+    b.classList.toggle('on', !!on);
+    b.classList.toggle('primary', !!on);
+  };
+  setBtn('assist-tog', assistSvc.assist, 'Assist · ON', 'Assist · OFF');
+  setBtn('assist-ui-tog', assistSvc.ui, 'Web UI · ON', 'Web UI · OFF');
+  setBtn('assist-mcp-tog', assistSvc.mcp, 'MCP chat · ON', 'MCP chat · OFF');
+  updateAssistOpenLink();
+}
+
+async function refreshAssistServices(){
+  const st=$('assist-status'), msg=$('assist-svc-msg');
+  const c=cfg();
+  assistSvc.mcp = !(c.mcpMode==='off' || c.mcpEnabled===false);
+  paintAssistToggles();
+  if(!c.host){
+    if(st) st.innerHTML='<div>Set robot host in Settings.</div>';
+    return;
+  }
+  if(st) st.textContent='Checking services…';
+  try{
+    const j=await rock('/api/v1/services');
+    assistSvc.assist = !!(j.assist && j.assist.alive);
+    assistSvc.ui = !!(j.ui && j.ui.enabled);
+    /* If assist is up, peer control is a better live UI signal */
+    try{
+      const ctl=await peerJson('/peer/v1/control',{headers:peerHeaders()});
+      if(typeof ctl.ui_enabled==='boolean') assistSvc.ui = ctl.ui_enabled;
+    }catch(e){}
+    paintAssistToggles();
+    if(st){
+      st.innerHTML =
+        `<div><span>assist</span> ${assistSvc.assist?'online':'offline'} · port ${c.assistPort||8787}</div>`+
+        `<div><span>web ui</span> ${assistSvc.ui?'on':'off'} · <a href="${esc(c.nano||'#')}/" target="_blank" rel="noopener">${esc(c.nano||'')}/</a></div>`+
+        `<div><span>mcp chat</span> ${assistSvc.mcp?'enabled (this browser)':'off'}</div>`;
+    }
+    if(msg) msg.textContent='';
+  }catch(e){
+    if(st) st.innerHTML='<div class="err">services: '+esc(e.message)+'</div>';
+  }
+  updateAssistHint();
+}
+
+async function setRobotService(service, on){
+  const msg=$('assist-svc-msg');
+  if(msg) msg.textContent='Setting '+service+' '+(on?'on':'off')+'…';
+  await rock('/api/v1/services',{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({service, action: on?'on':'off'})
+  });
+  /* UI/assist restart needs a moment */
+  await new Promise(r=>setTimeout(r, service==='ui'?2500:800));
+  await refreshAssistServices();
+  if(msg) msg.textContent=service+' → '+(on?'on':'off');
+}
+
+if($('assist-refresh')) $('assist-refresh').onclick=()=>refreshAssistServices();
+if($('assist-tog')) $('assist-tog').onclick=async()=>{
+  try{ await setRobotService('assist', !assistSvc.assist); }
+  catch(e){ if($('assist-svc-msg')) $('assist-svc-msg').textContent=e.message; }
+};
+if($('assist-ui-tog')) $('assist-ui-tog').onclick=async()=>{
+  try{ await setRobotService('ui', !assistSvc.ui); }
+  catch(e){ if($('assist-svc-msg')) $('assist-svc-msg').textContent=e.message; }
+};
+if($('assist-mcp-tog')) $('assist-mcp-tog').onclick=()=>{
+  const c=cfg();
+  const on = !(c.mcpMode==='off' || c.mcpEnabled===false);
+  const next = !on;
+  saveCfg({
+    ...c,
+    mcpEnabled: next,
+    mcpMode: next ? (c.mcpMode==='off'||!c.mcpMode ? 'peer' : c.mcpMode) : 'off'
+  });
+  assistSvc.mcp = next;
+  paintAssistToggles();
+  updateAssistHint();
+  if($('assist-svc-msg'))
+    $('assist-svc-msg').textContent = next ? 'MCP chat on (this browser)' : 'MCP chat off';
+  refreshAssistServices();
+};
+updateAssistOpenLink();
+['cfg-host','cfg-rock-port','cfg-assist-port'].forEach(id=>{
+  const el=$(id); if(!el) return;
+  el.addEventListener('input',()=>{
+    // live preview without save
+    const snap=readCfgForm();
+    saveCfg(snap);
+    updateDerivedCfg();
+  });
+});
+$('cfg-save').onclick=()=>{
+  saveCfg(readCfgForm());
+  fillCfg();
+  $('cfg-st').textContent='saved · host + ports (one robot)';
+  updateAssistHint();
+  refreshStatus();
+};
+$('cfg-ping').onclick=async()=>{
+  saveCfg(readCfgForm());
+  fillCfg();
+  const c=cfg();
+  const o=[];
+  if(!c.host){ $('cfg-st').textContent='set host first'; return; }
+  try{
+    const h=await rock('/api/v1/health');
+    o.push('rockctl ✓ '+(h.service||'')+' :'+c.rockPort);
+  }catch(e){ o.push('rockctl ✗ '+e.message); }
+  try{
+    const r=await fetch(c.nano+'/peer/v1/health',{headers:peerHeaders()});
+    const j=await r.json();
+    o.push('assist health ✓ v'+(j.version||'?')+' :'+c.assistPort);
+  }catch(e){ o.push('assist health ✗ '+e.message); }
+  try{
+    const j=await peerJson('/peer/v1/info',{headers:peerHeaders()});
+    o.push('peer info ✓ signed_in='+j.signed_in+' model='+(j.model||''));
+  }catch(e){ o.push('peer info ✗ '+e.message); }
+  o.push('<span>host</span> '+c.host);
+  $('cfg-st').innerHTML=o.map(x=>'<div>'+x+'</div>').join('');
+  updateAssistHint();
+};
+if($('cfg-mcp-info')) $('cfg-mcp-info').onclick=()=>$('cfg-ping').onclick();
+
+/* Peer token: generate + install via rockctl (product path) */
+if($('cfg-tok-gen')) $('cfg-tok-gen').onclick=async()=>{
+  const st=$('cfg-tok-st');
+  try{
+    st.textContent='generating on robot…';
+    saveCfg(readCfgForm());
+    const cur=($('cfg-mcp-token')&&$('cfg-mcp-token').value.trim())||sessionPeerToken()||'';
+    const headers={'Content-Type':'application/json'};
+    if(cur) headers['X-Nanobot-Peer-Token']=cur;
+    const j=await rock('/api/v1/assist/peer_token',{
+      method:'POST',
+      headers,
+      body:JSON.stringify({action:'generate', current_token:cur||undefined})
+    });
+    if(!j || !j.ok || !j.token) throw new Error((j&&j.error)||'no token');
+    if($('cfg-mcp-token')) $('cfg-mcp-token').value=j.token;
+    const c=readCfgForm(); c.mcpToken=j.token; saveCfg(c);
+    try{ sessionStorage.setItem('clankerdash_session_peer_token', j.token); }catch(e){}
+    st.textContent='installed on robot + saved in browser ('+j.token.length+' hex). Seals Grok OAuth at rest. Use Assistant tab.';
+  }catch(e){ st.textContent='generate failed: '+e.message+(String(e.message).indexOf('configured')>=0?' — paste current token first to rotate':''); }
+};
+if($('cfg-tok-admin')) $('cfg-tok-admin').onclick=async()=>{
+  const st=$('cfg-tok-st');
+  try{
+    let m=authMasterHex();
+    if(!m){
+      const typed=($('auth-master')&&$('auth-master').value||'').replace(/\s+/g,'');
+      if(typed.length===64){ m=typed; sessionStorage.setItem(AUTH_SS_MASTER,m); authUnlockUi(); }
+    }
+    if(!m || m.length!==64) throw new Error('unlock labauth master first (64-hex) — admin reset');
+    st.textContent='admin reset via labauth master…';
+    const j=await rock('/api/v1/assist/peer_token',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'admin_reset', master:m})
+    });
+    if(!j||!j.ok||!j.token) throw new Error((j&&j.error)||'reset failed');
+    if($('cfg-mcp-token')) $('cfg-mcp-token').value=j.token;
+    const c=readCfgForm(); c.mcpToken=j.token; saveCfg(c);
+    try{ sessionStorage.setItem('clankerdash_session_peer_token', j.token); }catch(e){}
+    st.textContent='ADMIN RESET ok — new peer token installed + saved ('+j.token.length+' hex).';
+  }catch(e){ st.textContent='admin reset failed: '+e.message; }
+};
+if($('cfg-tok-status')) $('cfg-tok-status').onclick=async()=>{
+  const st=$('cfg-tok-st');
+  try{
+    const j=await rock('/api/v1/assist/peer_token');
+    st.textContent=(j.configured?'robot has peer_token':'NO peer_token')
+      +' · labauth master '+(j.labauth_master?'present (admin reset ok)':'missing');
+  }catch(e){ st.textContent='status failed: '+e.message; }
+};
+if($('cfg-tok-save')) $('cfg-tok-save').onclick=()=>{
+  const t=($('cfg-mcp-token')&&$('cfg-mcp-token').value.trim())||'';
+  const c=readCfgForm(); c.mcpToken=t; saveCfg(c);
+  if($('cfg-tok-st')) $('cfg-tok-st').textContent=t?'saved in browser':'cleared browser token';
+};
+
+/* ----- labauth master + web password (works on http:// robot IP; no SubtleCrypto) -----
+ * Master in sessionStorage only. Envelope laweb2: = master-keyed stream XOR + MAC.
+ * (Web Crypto AES-GCM is unavailable on non-HTTPS ClankerDash — that caused digest errors.)
+ */
+const AUTH_SS_MASTER = 'labauth_master_hex';
+const AUTH_SS_FP = 'labauth_fp';
+const AUTH_LS_PW = 'labauth_web_password_env';
+
+function authMasterHex(){ return sessionStorage.getItem(AUTH_SS_MASTER) || ''; }
+function authSetStatus(t){ if($('auth-st')) $('auth-st').textContent = t; }
+function authUnlockUi(){
+  const m = authMasterHex();
+  authSetStatus(m ? 'unlocked (session) · master held in memory only' : 'locked');
+  if($('auth-fp') && !($('auth-fp').value||'').trim())
+    $('auth-fp').value = sessionStorage.getItem(AUTH_SS_FP) || localStorage.getItem(AUTH_SS_FP) || '';
+  if($('auth-pw-env') && !($('auth-pw-env').value||'').trim())
+    $('auth-pw-env').value = localStorage.getItem(AUTH_LS_PW) || '';
+}
+function hexToBytes(hex){
+  hex = (hex||'').replace(/\s+/g,'').toLowerCase();
+  if(hex.length % 2) throw new Error('odd hex');
+  const u = new Uint8Array(hex.length/2);
+  for(let i=0;i<u.length;i++) u[i] = parseInt(hex.substr(i*2,2),16);
+  return u;
+}
+function bytesToHex(buf){
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function randomBytes(n){
+  const u = new Uint8Array(n);
+  if(globalThis.crypto && crypto.getRandomValues) crypto.getRandomValues(u);
+  else for(let i=0;i<n;i++) u[i] = (Math.random()*256)|0;
+  return u;
+}
+/* Pure JS SHA-256 (for http:// pages without crypto.subtle) */
+function sha256sync(bytes){
+  const K=new Uint32Array([
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+  function rotr(x,n){return (x>>>n)|(x<<(32-n));}
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const bitLen = u8.length * 8;
+  const withOne = u8.length + 1;
+  let padLen = withOne % 64;
+  padLen = padLen <= 56 ? 56 - padLen : 120 - padLen;
+  const total = withOne + padLen + 8;
+  const msg = new Uint8Array(total);
+  msg.set(u8);
+  msg[u8.length] = 0x80;
+  const dv = new DataView(msg.buffer);
+  dv.setUint32(total - 4, bitLen >>> 0, false);
+  dv.setUint32(total - 8, Math.floor(bitLen / 0x100000000), false);
+  let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a;
+  let h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
+  const w = new Uint32Array(64);
+  for(let i=0;i<total;i+=64){
+    for(let j=0;j<16;j++) w[j]=dv.getUint32(i+j*4,false);
+    for(let j=16;j<64;j++){
+      const s0=rotr(w[j-15],7)^rotr(w[j-15],18)^(w[j-15]>>>3);
+      const s1=rotr(w[j-2],17)^rotr(w[j-2],19)^(w[j-2]>>>10);
+      w[j]=(w[j-16]+s0+w[j-7]+s1)>>>0;
+    }
+    let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
+    for(let j=0;j<64;j++){
+      const S1=rotr(e,6)^rotr(e,11)^rotr(e,25);
+      const ch=(e&f)^((~e)&g);
+      const t1=(h+S1+ch+K[j]+w[j])>>>0;
+      const S0=rotr(a,2)^rotr(a,13)^rotr(a,22);
+      const maj=(a&b)^(a&c)^(b&c);
+      const t2=(S0+maj)>>>0;
+      h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+    }
+    h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;
+    h4=(h4+e)>>>0;h5=(h5+f)>>>0;h6=(h6+g)>>>0;h7=(h7+h)>>>0;
+  }
+  const out=new Uint8Array(32);
+  const o=new DataView(out.buffer);
+  o.setUint32(0,h0,false);o.setUint32(4,h1,false);o.setUint32(8,h2,false);o.setUint32(12,h3,false);
+  o.setUint32(16,h4,false);o.setUint32(20,h5,false);o.setUint32(24,h6,false);o.setUint32(28,h7,false);
+  return out;
+}
+async function sha256(bytes){
+  if(globalThis.crypto && crypto.subtle){
+    try{ return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)); }catch(e){}
+  }
+  return sha256sync(bytes);
+}
+function masterKeystream(masterHex, nonce, len){
+  const m = hexToBytes(masterHex);
+  if(m.length !== 32) throw new Error('master must be 32 bytes (64 hex)');
+  const out = new Uint8Array(len);
+  let off = 0, ctr = 0;
+  while(off < len){
+    const block = new Uint8Array(32 + nonce.length + 4);
+    block.set(m, 0);
+    block.set(nonce, 32);
+    block[32+nonce.length] = (ctr>>>24)&255;
+    block[33+nonce.length] = (ctr>>>16)&255;
+    block[34+nonce.length] = (ctr>>>8)&255;
+    block[35+nonce.length] = ctr&255;
+    const h = sha256sync(block);
+    const n = Math.min(32, len - off);
+    out.set(h.subarray(0, n), off);
+    off += n; ctr++;
+  }
+  return out;
+}
+function b64enc(u8){
+  let bin=''; u8.forEach(b=> bin+=String.fromCharCode(b));
+  return btoa(bin);
+}
+function b64dec(s){
+  const bin=atob(s);
+  const u=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+  return u;
+}
+async function sealWebPassword(masterHex, password){
+  const salt = randomBytes(16);
+  const enc = new TextEncoder();
+  const material = new Uint8Array(salt.length + enc.encode(password).length);
+  material.set(salt, 0);
+  material.set(enc.encode(password), salt.length);
+  const hash = await sha256(material);
+  const rec = JSON.stringify({v:2, scheme:'laweb2-sha256', salt:bytesToHex(salt), hash:bytesToHex(hash)});
+  const pt = enc.encode(rec);
+  const nonce = randomBytes(16);
+  const ks = masterKeystream(masterHex, nonce, pt.length);
+  const ct = new Uint8Array(pt.length);
+  for(let i=0;i<pt.length;i++) ct[i]=pt[i]^ks[i];
+  const macIn = new Uint8Array(32 + nonce.length + ct.length);
+  macIn.set(hexToBytes(masterHex), 0);
+  macIn.set(nonce, 32);
+  macIn.set(ct, 32+nonce.length);
+  const mac = sha256sync(macIn);
+  const out = new Uint8Array(16 + 16 + ct.length);
+  out.set(nonce, 0); out.set(mac.subarray(0,16), 16); out.set(ct, 32);
+  return 'laweb2:' + b64enc(out);
+}
+async function verifyWebPassword(masterHex, envelope, password){
+  if(!envelope) throw new Error('empty envelope');
+  // legacy laweb1 only if SubtleCrypto available
+  if(envelope.startsWith('laweb1:')){
+    if(!(globalThis.crypto && crypto.subtle))
+      throw new Error('laweb1 needs HTTPS; re-set password (laweb2 works on http://)');
+    const bin = atob(envelope.slice(7));
+    const raw = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) raw[i]=bin.charCodeAt(i);
+    const iv = raw.slice(0,12), ct = raw.slice(12);
+    const key = await crypto.subtle.importKey('raw', hexToBytes(masterHex), {name:'AES-GCM'}, false, ['decrypt']);
+    const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ct);
+    const rec = JSON.parse(new TextDecoder().decode(pt));
+    return await checkPwRec(rec, password);
+  }
+  if(!envelope.startsWith('laweb2:')) throw new Error('need laweb2: envelope (set password again)');
+  const raw = b64dec(envelope.slice(7));
+  if(raw.length < 33) throw new Error('envelope too short');
+  const nonce = raw.slice(0,16), mac = raw.slice(16,32), ct = raw.slice(32);
+  const macIn = new Uint8Array(32 + nonce.length + ct.length);
+  macIn.set(hexToBytes(masterHex), 0);
+  macIn.set(nonce, 32);
+  macIn.set(ct, 32+nonce.length);
+  const expect = sha256sync(macIn).subarray(0,16);
+  let d=0; for(let i=0;i<16;i++) d |= mac[i]^expect[i];
+  if(d!==0) throw new Error('bad master or corrupt envelope');
+  const ks = masterKeystream(masterHex, nonce, ct.length);
+  const pt = new Uint8Array(ct.length);
+  for(let i=0;i<ct.length;i++) pt[i]=ct[i]^ks[i];
+  const rec = JSON.parse(new TextDecoder().decode(pt));
+  return await checkPwRec(rec, password);
+}
+async function checkPwRec(rec, password){
+  const salt = hexToBytes(rec.salt);
+  const enc = new TextEncoder();
+  const material = new Uint8Array(salt.length + enc.encode(password).length);
+  material.set(salt, 0);
+  material.set(enc.encode(password), salt.length);
+  const hash = await sha256(material);
+  const expect = hexToBytes(rec.hash);
+  if(hash.length !== expect.length) return false;
+  let d=0; for(let i=0;i<hash.length;i++) d |= hash[i]^expect[i];
+  return d===0;
+}
+
+/* gate: AUTH_LS_GATE={salt,hash}; AUTH_LS_PW=optional laweb2 */
+const AUTH_LS_GATE = 'labauth_web_gate_v1';
+const SETTINGS_UNLOCK_SS='clankerdash_settings_unlocked';
+
+async function sealGatePassword(password){
+  const salt = randomBytes(16);
+  const enc = new TextEncoder();
+  const material = new Uint8Array(salt.length + enc.encode(password).length);
+  material.set(salt, 0);
+  material.set(enc.encode(password), salt.length);
+  const hash = await sha256(material);
+  const rec = {v:1, salt:bytesToHex(salt), hash:bytesToHex(hash)};
+  localStorage.setItem(AUTH_LS_GATE, JSON.stringify(rec));
+  return rec;
+}
+async function verifyGatePassword(password){
+  const raw = localStorage.getItem(AUTH_LS_GATE);
+  if(!raw) return false;
+  let rec;
+  try{ rec = JSON.parse(raw); }catch(e){ return false; }
+  if(!rec || !rec.salt || !rec.hash) return false;
+  return await checkPwRec(rec, password||'');
+}
+function settingsHasGateRecord(){
+  try{ return !!(localStorage.getItem(AUTH_LS_GATE)||'').trim(); }catch(e){return false;}
+}
+function settingsHasSealedPw(){
+  try{
+    const e=localStorage.getItem(AUTH_LS_PW)||'';
+    return e.indexOf('laweb2:')===0||e.indexOf('laweb1:')===0;
+  }catch(e){return false;}
+}
+function settingsHasPassword(){
+  return settingsHasGateRecord() || settingsHasSealedPw();
+}
+function settingsUnlocked(){
+  try{ return sessionStorage.getItem(SETTINGS_UNLOCK_SS)==='1'; }catch(e){return false;}
+}
+function openSettingsSession(){
+  sessionStorage.setItem(SETTINGS_UNLOCK_SS,'1');
+  applySettingsGate();
+}
+function bindEnter(el, fn){
+  if(!el) return;
+  el.addEventListener('keydown', (ev)=>{
+    if(ev.key==='Enter'){ ev.preventDefault(); fn(); }
+  });
+}
+
+if($('auth-show-master')) $('auth-show-master').onchange=()=>{
+  if($('auth-master')) $('auth-master').type = $('auth-show-master').checked ? 'text' : 'password';
+};
+function doAuthUnlock(){
+  try{
+    const hex = ($('auth-master').value||'').replace(/\s+/g,'');
+    if(hex.length!==64) throw new Error('paste 64-hex master from USB enroll');
+    hexToBytes(hex); // validate
+    sessionStorage.setItem(AUTH_SS_MASTER, hex);
+    const fp = ($('auth-fp').value||'').trim();
+    if(fp){ sessionStorage.setItem(AUTH_SS_FP, fp); localStorage.setItem(AUTH_SS_FP, fp); }
+    $('auth-master').value='';
+    authUnlockUi();
+    if($('auth-pw-st')) $('auth-pw-st').textContent='master unlocked';
+  }catch(e){ authSetStatus('unlock failed: '+e.message); }
+}
+if($('auth-unlock')) $('auth-unlock').onclick=doAuthUnlock;
+bindEnter($('auth-master'), doAuthUnlock);
+if($('auth-lock')) $('auth-lock').onclick=()=>{
+  sessionStorage.removeItem(AUTH_SS_MASTER);
+  authUnlockUi();
+  if($('auth-pw-st')) $('auth-pw-st').textContent='locked';
+};
+async function doAuthPwSet(){
+  const st=$('auth-pw-st');
+  if(st) st.textContent='setting…';
+  try{
+    const a=($('auth-pw')&&$('auth-pw').value)||'';
+    const b=($('auth-pw2')&&$('auth-pw2').value)||'';
+    if(!a) throw new Error('enter a password');
+    if(a!==b) throw new Error('passwords do not match');
+    if(a.length < 4) throw new Error('use at least 4 characters');
+    await sealGatePassword(a);
+    const m=authMasterHex();
+    let note='gate saved — Settings will ask for this password next visit';
+    if(m){
+      const env = await sealWebPassword(m, a);
+      if($('auth-pw-env')) $('auth-pw-env').value = env;
+      localStorage.setItem(AUTH_LS_PW, env);
+      note += ' · laweb2';
+    }else{
+      note += ' · no master seal';
+    }
+    if($('auth-pw')) $('auth-pw').value='';
+    if($('auth-pw2')) $('auth-pw2').value='';
+    openSettingsSession();
+    if(st) st.textContent='ok: '+note;
+  }catch(e){ if(st) st.textContent='set failed: '+e.message; }
+}
+if($('auth-pw-set')) $('auth-pw-set').onclick=doAuthPwSet;
+bindEnter($('auth-pw'), ()=>{ if($('auth-pw2')) $('auth-pw2').focus(); });
+bindEnter($('auth-pw2'), doAuthPwSet);
+if($('auth-pw-verify')) $('auth-pw-verify').onclick=async()=>{
+  const st=$('auth-pw-st');
+  if(st) st.textContent='verifying…';
+  try{
+    const pw=($('auth-pw')&&$('auth-pw').value)||'';
+    if(!pw) throw new Error('enter password in New password field');
+    let ok=false;
+    if(settingsHasGateRecord()){
+      ok = await verifyGatePassword(pw);
+      if(st) st.textContent = ok ? 'password OK (gate)' : 'password FAIL (gate)';
+      return;
+    }
+    const m=authMasterHex();
+    if(!m) throw new Error('unlock master first (or set password to create gate)');
+    const env=(($('auth-pw-env')&&$('auth-pw-env').value)||localStorage.getItem(AUTH_LS_PW)||'').trim();
+    ok = await verifyWebPassword(m, env, pw);
+    if(ok) await sealGatePassword(pw); /* migrate */
+    if(st) st.textContent = ok ? 'password OK (migrated to gate)' : 'password FAIL';
+  }catch(e){ if(st) st.textContent='verify failed: '+e.message; }
+};
+if($('auth-pw-clear')) $('auth-pw-clear').onclick=()=>{
+  const st=$('auth-pw-st');
+  try{
+    localStorage.removeItem(AUTH_LS_GATE);
+    localStorage.removeItem(AUTH_LS_PW);
+    if($('auth-pw-env')) $('auth-pw-env').value='';
+    sessionStorage.removeItem(SETTINGS_UNLOCK_SS);
+    applySettingsGate();
+    if(st) st.textContent='password gate cleared — Settings open without password';
+  }catch(e){ if(st) st.textContent='clear failed: '+e.message; }
+};
+authUnlockUi();
+
+function applySettingsGate(){
+  const gate=$('settings-gate-card'), body=$('settings-body');
+  if(!gate||!body) return;
+  const need=settingsHasPassword();
+  const wrap=$('settings-gate-master-wrap');
+  if(!need){
+    gate.style.display='none';
+    body.style.display='block';
+    if(wrap) wrap.style.display='none';
+    return;
+  }
+  const open=settingsUnlocked();
+  gate.style.display=open?'none':'block';
+  body.style.display=open?'block':'none';
+  /* show one-time master field only when sealed backup exists without gate record */
+  if(wrap) wrap.style.display=(!open && !settingsHasGateRecord() && settingsHasSealedPw())?'block':'none';
+  if(!open && $('settings-gate-st')){
+    const cur=($('settings-gate-st').textContent||'');
+    /* don't clobber active error/success messages */
+    if(!cur || cur.indexOf('locked')===0 || cur.indexOf('enter')===0)
+      $('settings-gate-st').textContent = settingsHasGateRecord()
+        ? 'locked'
+        : 'locked (legacy: need master)';
+  }
+}
+async function doSettingsGateUnlock(){
+  const st=$('settings-gate-st');
+  if(st) st.textContent='checking…';
+  try{
+    const pw=($('settings-gate-pw')&&$('settings-gate-pw').value)||'';
+    if(!pw) throw new Error('enter password');
+    if(settingsHasGateRecord()){
+      if(!await verifyGatePassword(pw)) throw new Error('wrong password');
+      if($('settings-gate-pw')) $('settings-gate-pw').value='';
+      openSettingsSession();
+      if(st) st.textContent='unlocked';
+      return;
+    }
+    /* Legacy: sealed laweb2 only — need master once, then migrate gate */
+    if(settingsHasSealedPw()){
+      let m=authMasterHex();
+      const gm=($('settings-gate-master')&&$('settings-gate-master').value||'').replace(/\s+/g,'');
+      if(!m && gm.length===64){
+        hexToBytes(gm);
+        sessionStorage.setItem(AUTH_SS_MASTER, gm);
+        m=gm;
+        if($('settings-gate-master')) $('settings-gate-master').value='';
+        authUnlockUi();
+      }
+      if(!m) throw new Error('need master (legacy)');
+      const env=localStorage.getItem(AUTH_LS_PW)||'';
+      if(!await verifyWebPassword(m, env, pw)) throw new Error('wrong password or master');
+      await sealGatePassword(pw);
+      if($('settings-gate-pw')) $('settings-gate-pw').value='';
+      openSettingsSession();
+      if(st) st.textContent='unlocked (gate upgraded)';
+      return;
+    }
+    throw new Error('no password configured — use No password yet');
+  }catch(e){ if(st) st.textContent='unlock failed: '+e.message; }
+}
+if($('settings-gate-unlock')) $('settings-gate-unlock').onclick=doSettingsGateUnlock;
+bindEnter($('settings-gate-pw'), doSettingsGateUnlock);
+bindEnter($('settings-gate-master'), doSettingsGateUnlock);
+if($('settings-gate-skip')) $('settings-gate-skip').onclick=()=>{
+  if(settingsHasPassword()){
+    if($('settings-gate-st')) $('settings-gate-st').textContent='need password';
+    return;
+  }
+  openSettingsSession();
+  if($('settings-gate-st')) $('settings-gate-st').textContent='opened (no password set)';
+};
+const _showTabOrig=showTab;
+showTab=function(name){
+  _showTabOrig(name);
+  if(name==='settings') applySettingsGate();
+};
+/* apply gate on load if Settings is already visible */
+try{ applySettingsGate(); }catch(e){}
+
+async function peerPrompt(prompt){
+  const c=cfg();
+  const body={prompt};
+  if(c.mcpToken) body.peer_token=c.mcpToken;
+  return peerJson('/peer/v1/prompt',{
+    method:'POST',
+    headers:peerHeaders(),
+    body:JSON.stringify(body)
+  });
+}
+
+$('cfg-improve').onclick=async()=>{
+  saveCfg(readCfgForm());
+  $('cfg-improve-st').textContent='running self-improve cycle via peer…';
+  try{
+    const j=await peerPrompt(
+      'SELF-IMPROVEMENT CYCLE: Observe host, read memory/self_improve.txt if present, '
+      +'make ONE small durable improvement (docs, script, memory fact, or rockctl/clanker ops if on robot). '
+      +'No mass delete. End with RESULT: and NEXT: lines.'
+    );
+    $('cfg-improve-st').textContent=(j.reply||JSON.stringify(j)).slice(0,800);
+  }catch(e){ $('cfg-improve-st').textContent='failed: '+e.message; }
+};
+$('cfg-improve-status').onclick=async()=>{
+  saveCfg(readCfgForm());
+  try{
+    const j=await peerPrompt(
+      '@! echo "=== nanobot home ==="; echo "NANOBOT_HOME=${NANOBOT_HOME:-?}"; '
+      +'ls -la "${NANOBOT_HOME:-/mnt/data/nanobot}/memory" 2>/dev/null | head -20; '
+      +'echo "=== peer ==="; cat "${NANOBOT_HOME:-/mnt/data/nanobot}/VERSION" 2>/dev/null; uname -a'
+    );
+    $('cfg-improve-st').textContent=(j.reply||j.output||JSON.stringify(j)).slice(0,800);
+  }catch(e){ $('cfg-improve-st').textContent='failed: '+e.message; }
+};
+
+/* ----- assistant ----- */
+function add(cls,t){ const d=document.createElement('div'); d.className=cls; d.textContent=t; $('log').appendChild(d); $('log').scrollTop=$('log').scrollHeight; }
+async function ask(){
+  const text=$('q').value.trim(); if(!text) return;
+  const c=cfg();
+  if(c.mcpMode==='off'||!c.mcpEnabled){
+    add('err','Assistant disabled — enable MCP in Settings');
+    return;
+  }
+  $('q').value=''; add('u','› '+text);
+  try{
+    if(c.mcpMode==='peer'){
+      const j=await peerPrompt(text);
+      add(j.need_login?'s':'a', j.reply||j.error||'(no reply)');
+    }else{
+      const r=await fetch(c.nano+'/api/chat',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({prompt:text})
+      });
+      const j=await r.json();
+      add(j.need_login?'s':'a', j.reply||j.error||'(no reply)');
+    }
+  }catch(e){ add('err','assistant offline: '+e.message); }
+}
+$('ask').onclick=ask;
+$('q').addEventListener('keydown',e=>{ if(e.key==='Enter') ask(); });
+
+(async function boot(){
+  fillCfg();
+  await hydrateFromServer();
+  fillCfg();
+  updateAssistHint();
+  if(!cfg().rock){
+    const p=$('pill'); if(p) p.innerHTML='<span class="warn">set robot host in Settings</span>';
+    const st=$('status'); if(st) st.textContent='Configure endpoints (no default lab IP).';
+  }else{
+    await refreshStatus();
+    setInterval(refreshStatus, 5000);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Clanker mix fragment — install as /root/.asoundrc (merged with system alsa.conf)
+pcm.clanker_dmix {
+    type dmix
+    ipc_key 424242
+    ipc_perm 0666
+    slave {
+        pcm "hw:0,0"
+        format S32_LE
+        rate 44100
+        channels 2
+        period_size 1024
+        buffer_size 8192
+    }
+}
+pcm.clanker {
+    type plug
+    slave.pcm "clanker_dmix"
+}

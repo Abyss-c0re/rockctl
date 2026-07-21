@@ -1,0 +1,8 @@
+rockctl — local Roborock miio control (CLI + HTTP)
+
+Third-party:
+
+- third_party/aes.c / aes.h — public domain AES (tiny-AES-c style test vectors in comments)
+- third_party/md5.c / md5.h — public domain MD5 (miio framing)
+
+Not affiliated with Roborock, Xiaomi, or Valetudo.
