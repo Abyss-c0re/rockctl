@@ -127,6 +127,15 @@ int main(int argc, char **argv) {
   } else if (!strcmp(cmd, "pause")) {
     rc = miio_call(&m, "app_pause", "[]", &result);
   } else if (!strcmp(cmd, "home") || !strcmp(cmd, "dock")) {
+    /* Drop RC first — app_charge often ignored while manual/RC is active */
+    free(result);
+    result = NULL;
+    miio_call(&m, "app_rc_end", "[]", &result);
+    free(result);
+    result = NULL;
+    miio_call(&m, "app_pause", "[]", &result);
+    free(result);
+    result = NULL;
     rc = miio_call(&m, "app_charge", "[]", &result);
   } else if (!strcmp(cmd, "spot")) {
     rc = miio_call(&m, "app_spot", "[]", &result);

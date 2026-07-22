@@ -3788,14 +3788,57 @@ if($('cfg-reboot')) $('cfg-reboot').onclick=()=>systemAction('reboot',
 
 /* ----- assistant ----- */
 function add(cls,t){ const d=document.createElement('div'); d.className=cls; d.textContent=t; $('log').appendChild(d); $('log').scrollTop=$('log').scrollHeight; }
+/** Motion verbs → rockctl control (skip LLM). Home must not depend on peer shell. */
+function assistMotionAction(text){
+  const t=(text||'').trim().toLowerCase();
+  if(!t) return null;
+  if(/^(go\s+)?home$|^dock$|^charge$/.test(t) ||
+     /\b(go|send|return|come|drive)\s+(?:(?:clanker|the\s+robot|it)\s+)?(home|to\s+(the\s+)?(dock|base|charger))\b/.test(t) ||
+     /\bsend\s+\w+\s+home\b/.test(t) ||
+     /\breturn\s+to\s+(the\s+)?(dock|base)\b/.test(t))
+    return 'home';
+  if(/^(stop|halt|pause)(\s+cleaning)?$/.test(t) ||
+     /\b(stop|halt)\s+(cleaning|clean|vacuum)\b/.test(t))
+    return t.startsWith('pause')?'pause':'stop';
+  if(/^(start|clean)$/.test(t) ||
+     /\b(start|begin)\s+(cleaning|clean|vacuum)\b/.test(t) ||
+     /\bgo\s+clean\b/.test(t))
+    return 'start';
+  if(/^locate$|^find(\s+me)?$|^beep$/.test(t)) return 'locate';
+  if(/^spot(\s+clean)?$/.test(t)) return 'spot';
+  return null;
+}
 async function ask(){
   const text=$('q').value.trim(); if(!text) return;
   const c=cfg();
-  if(c.mcpMode==='off'||!c.mcpEnabled){
-    add('err','Assistant disabled — enable MCP in Settings');
+  $('q').value=''; add('u','› '+text);
+  /* Vacuum motion: always rockctl, even if MCP chat is off */
+  const motion = assistMotionAction(text);
+  if(motion){
+    try{
+      const r = await rock('/api/v1/control',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:motion, sync:true})
+      });
+      const st = r && !r.error ? await rock('/api/v1/status').catch(()=>null) : null;
+      const row = st && st.result && st.result[0];
+      const label = row ? (STATES[row.state]||('state '+row.state)) : '?';
+      if(r && r.error){
+        add('err', motion+': '+r.error);
+      }else{
+        add('a', motion+' → '+(r && r.result ? JSON.stringify(r.result) : 'ok')
+          +' · now '+label
+          +(row?` bat ${row.battery}% ret ${row.in_returning} chg ${row.charge_status}`:''));
+      }
+      try{ refreshStatus(); }catch(e){}
+    }catch(e){ add('err', motion+' failed: '+e.message); }
     return;
   }
-  $('q').value=''; add('u','› '+text);
+  if(c.mcpMode==='off'||!c.mcpEnabled){
+    add('err','Assistant chat disabled — enable MCP in Settings (Dock/home still works above)');
+    return;
+  }
   try{
     if(c.mcpMode==='peer'){
       const j=await peerPrompt(text);

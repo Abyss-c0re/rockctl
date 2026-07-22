@@ -435,7 +435,17 @@ static int do_action(miio_client *m, const char *action, char **out) {
   if (!strcmp(action,"start")) method="app_start";
   else if (!strcmp(action,"stop")) method="app_stop";
   else if (!strcmp(action,"pause")) method="app_pause";
-  else if (!strcmp(action,"home")||!strcmp(action,"dock")||!strcmp(action,"charge")) method="app_charge";
+  else if (!strcmp(action,"home")||!strcmp(action,"dock")||!strcmp(action,"charge")) {
+    /* Home often no-ops while app_rc_* / manual is engaged. Drop RC first,
+     * pause any active clean, then app_charge. Failures on pre-steps are OK. */
+    char *tmp = NULL;
+    miio_call(m, "app_rc_end", "[]", &tmp);
+    free(tmp);
+    tmp = NULL;
+    miio_call(m, "app_pause", "[]", &tmp);
+    free(tmp);
+    return miio_call(m, "app_charge", "[]", out);
+  }
   else if (!strcmp(action,"spot")) method="app_spot";
   else if (!strcmp(action,"locate")||!strcmp(action,"find")) method="find_me";
   else if (!strcmp(action,"rc_start")||!strcmp(action,"manual_start")||!strcmp(action,"manual"))
