@@ -110,6 +110,7 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
     <button type="button" class="on" data-t="control">Control</button>
     <button type="button" data-t="map">Map</button>
     <button type="button" data-t="music">Music</button>
+    <button type="button" data-t="sounds">Sounds</button>
     <button type="button" data-t="schedule">Schedule</button>
     <button type="button" data-t="settings">Settings</button>
     <button type="button" data-t="assist">Assistant</button>
@@ -286,6 +287,63 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
       </div>
     </section>
 
+    <section id="p-sounds" class="page">
+      <div class="card">
+        <h2>Voice (SAM TTS)</h2>
+        <div class="hint">Global robot voice for live speak (Assistant stream, MCP, test). Settings live on the robot via rockctl — not in the nanobot wrapper UI.</div>
+        <label class="toggle-row"><input id="spk-en" type="checkbox"/> Enable voice (SPEAK_ENABLED)</label>
+        <label>Volume <span id="spk-vol-lbl">35</span>%</label>
+        <input id="spk-volume" type="range" min="0" max="100" value="35" style="width:100%;accent-color:var(--acc)"/>
+        <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.4rem">
+          <div style="flex:1;min-width:5rem">
+            <label for="spk-pitch">Pitch</label>
+            <input id="spk-pitch" type="number" min="0" max="255" value="64"/>
+          </div>
+          <div style="flex:1;min-width:5rem">
+            <label for="spk-speed">Speed</label>
+            <input id="spk-speed" type="number" min="0" max="255" value="72"/>
+          </div>
+          <div style="flex:1;min-width:5rem">
+            <label for="spk-throat">Throat</label>
+            <input id="spk-throat" type="number" min="0" max="255" value="128"/>
+          </div>
+          <div style="flex:1;min-width:5rem">
+            <label for="spk-mouth">Mouth</label>
+            <input id="spk-mouth" type="number" min="0" max="255" value="128"/>
+          </div>
+        </div>
+        <label style="margin-top:.45rem">Test phrase</label>
+        <input id="spk-test-text" type="text" maxlength="200" placeholder="Hello. Soft voice on Clanker."/>
+        <div class="row" style="margin-top:.4rem;gap:.4rem;flex-wrap:wrap">
+          <button type="button" class="primary" id="spk-save">Save voice</button>
+          <button type="button" id="spk-test">Test on robot</button>
+          <button type="button" id="spk-refresh">Refresh</button>
+        </div>
+        <div class="kv" id="spk-st" style="margin-top:.35rem;color:var(--mut)">…</div>
+      </div>
+
+      <div class="card">
+        <h2>Event sounds</h2>
+        <div class="hint">Per-event clip on the robot (<code>/mnt/data/rockctl/sounds/</code>). Pick a WAV from the library, or type text and record with the same SAM TTS controls (pitch/speed/volume baked into the file).</div>
+        <div class="kv" id="snd-st" style="margin:.4rem 0">…</div>
+        <div id="snd-events"></div>
+        <div class="row" style="margin-top:.5rem">
+          <button type="button" id="snd-refresh">Refresh events</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Sound library</h2>
+        <div class="hint" id="snd-limits">WAV only · max 512 KB per clip · short event sounds</div>
+        <div id="snd-files" class="kv">…</div>
+        <input id="snd-file" type="file" accept=".wav,audio/wav,audio/x-wav,audio/wave" style="margin:.35rem 0"/>
+        <div class="row" style="gap:.4rem;flex-wrap:wrap">
+          <button type="button" class="cyan" id="snd-upload">Upload WAV</button>
+        </div>
+        <div class="hint" id="snd-up-msg"></div>
+      </div>
+    </section>
+
     <section id="p-schedule" class="page">
       <div class="card">
         <h2>Cleaning schedule</h2>
@@ -431,7 +489,7 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
           Ultimate key is enrolled over <b>USB</b> with <b>ClankerCommander</b> / <code>labauth</code>
           (not branded nanobot). Fingerprint is public; master is secret.
           Web UI passwords are sealed under the master key.
-          See your labauth / USB master enrollment docs (out of tree).
+          See <code>~/Dev/labauth/docs/USB_MASTER.md</code>.
         </div>
         <label>Device fingerprint (public)</label>
         <input id="auth-fp" type="text" spellcheck="false" placeholder="64-hex from labauth fingerprint …" autocomplete="off"/>
@@ -706,6 +764,7 @@ function showTab(name){
     }, period);
   }
   if(name==='music') refreshMusic();
+  if(name==='sounds'){ refreshSpeak(); refreshSounds(); }
   if(name==='schedule') loadSchedule();
   if(name==='assist') refreshAssistServices();
 }
@@ -1237,7 +1296,7 @@ function estimateRobotFromPath(){
 function buildOffscreen(){
   if(!mapMeta||!mapPixels||!mapCrop.w) return;
   const fw=mapFull.w, {x:cx,y:cy,w,h}=mapCrop;
-  /* Downsample large maps for small screens / low-end browsers (keeps UI responsive). */
+  /* Downsample large maps for Android / low-end browsers (keeps UI responsive). */
   let step=1;
   const pix=w*h;
   const mobile=window.matchMedia && matchMedia('(max-width:720px), (pointer:coarse)').matches;
@@ -2094,6 +2153,308 @@ if($('music-cur-delete')) $('music-cur-delete').onclick=async()=>{
     if(msg) msg.textContent='Deleted '+name;
     await refreshMusic();
   }catch(e){ if(msg) msg.textContent='Delete failed: '+e.message; }
+};
+
+/* ----- SOUNDS (event clips + global SAM TTS) ----- */
+const SND_MAX_DEFAULT = 512 * 1024;
+let soundState = { files: [], events: [], maxBytes: SND_MAX_DEFAULT, tts: {} };
+
+function ttsFromForm(){
+  return {
+    volume: parseInt(($('spk-volume')&&$('spk-volume').value)||'35',10)||0,
+    pitch: parseInt(($('spk-pitch')&&$('spk-pitch').value)||'64',10)||64,
+    speed: parseInt(($('spk-speed')&&$('spk-speed').value)||'72',10)||72,
+    throat: parseInt(($('spk-throat')&&$('spk-throat').value)||'128',10)||128,
+    mouth: parseInt(($('spk-mouth')&&$('spk-mouth').value)||'128',10)||128,
+    enabled: !!($('spk-en')&&$('spk-en').checked)
+  };
+}
+function applyTtsToForm(t){
+  if(!t) return;
+  if($('spk-en')) $('spk-en').checked = !!t.enabled;
+  if($('spk-volume') && t.volume!=null){ $('spk-volume').value=t.volume; if($('spk-vol-lbl')) $('spk-vol-lbl').textContent=String(t.volume); }
+  if($('spk-pitch') && t.pitch!=null) $('spk-pitch').value=t.pitch;
+  if($('spk-speed') && t.speed!=null) $('spk-speed').value=t.speed;
+  if($('spk-throat') && t.throat!=null) $('spk-throat').value=t.throat;
+  if($('spk-mouth') && t.mouth!=null) $('spk-mouth').value=t.mouth;
+}
+function ttsFromEventCard(id){
+  const root = document.querySelector('[data-evt-root="'+id+'"]');
+  if(!root) return ttsFromForm();
+  const g = (k)=>{ const el=root.querySelector('[data-tts="'+k+'"]'); return el?parseInt(el.value,10):NaN; };
+  const base = ttsFromForm();
+  const volume = g('volume'); const pitch=g('pitch'); const speed=g('speed');
+  const throat=g('throat'); const mouth=g('mouth');
+  return {
+    volume: Number.isFinite(volume)?volume:base.volume,
+    pitch: Number.isFinite(pitch)?pitch:base.pitch,
+    speed: Number.isFinite(speed)?speed:base.speed,
+    throat: Number.isFinite(throat)?throat:base.throat,
+    mouth: Number.isFinite(mouth)?mouth:base.mouth
+  };
+}
+async function refreshSpeak(){
+  const st=$('spk-st');
+  try{
+    const j=await rock('/api/v1/assist/speak');
+    applyTtsToForm(j);
+    soundState.tts = j;
+    if(st) st.innerHTML =
+      `<div><span>service</span> ${esc(j.service||'sam-speak')} · <span>enabled</span> ${j.enabled?'yes':'no'}</div>`+
+      `<div><span>vol</span> ${j.volume} · <span>pitch</span> ${j.pitch} · <span>speed</span> ${j.speed} · <span>throat</span> ${j.throat} · <span>mouth</span> ${j.mouth}</div>`+
+      `<div><span>sam</span> ${j.sam?'ok':'missing'} · <span>script</span> ${j.sam_speak?'ok':'missing'}</div>`;
+  }catch(e){ if(st) st.textContent='speak: '+e.message; }
+}
+async function saveSpeak(){
+  const st=$('spk-st');
+  const t=ttsFromForm();
+  try{
+    const j=await rock('/api/v1/assist/speak',{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'config', enabled:t.enabled, volume:t.volume, pitch:t.pitch, speed:t.speed, throat:t.throat, mouth:t.mouth})
+    });
+    if(st) st.textContent='Saved voice · vol '+j.volume+' pitch '+j.pitch;
+    await refreshSpeak();
+  }catch(e){ if(st) st.textContent='save failed: '+e.message; }
+}
+async function testSpeak(){
+  const st=$('spk-st');
+  const t=ttsFromForm();
+  const text=(($('spk-test-text')&&$('spk-test-text').value)||'').trim() || 'Hello. Soft voice on Clanker.';
+  if(st) st.textContent='Speaking…';
+  try{
+    await rock('/api/v1/assist/speak/test',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text, volume:t.volume, pitch:t.pitch, speed:t.speed, throat:t.throat, mouth:t.mouth, force:true, wait:true})
+    });
+    if(st) st.textContent='Played on robot speaker.';
+  }catch(e){ if(st) st.textContent='test failed: '+e.message; }
+}
+if($('spk-volume')) $('spk-volume').oninput=()=>{ if($('spk-vol-lbl')) $('spk-vol-lbl').textContent=$('spk-volume').value; };
+if($('spk-save')) $('spk-save').onclick=()=>saveSpeak();
+if($('spk-test')) $('spk-test').onclick=()=>testSpeak();
+if($('spk-refresh')) $('spk-refresh').onclick=()=>refreshSpeak();
+
+async function soundsPut(body){
+  return rock('/api/v1/sounds',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)});
+}
+function renderEventCard(ev, files){
+  const t = ev.tts||{};
+  const def = soundState.tts||{};
+  const vol = t.volume!=null?t.volume:(def.volume!=null?def.volume:35);
+  const pitch = t.pitch!=null?t.pitch:(def.pitch!=null?def.pitch:64);
+  const speed = t.speed!=null?t.speed:(def.speed!=null?def.speed:72);
+  const throat = t.throat!=null?t.throat:(def.throat!=null?def.throat:128);
+  const mouth = t.mouth!=null?t.mouth:(def.mouth!=null?def.mouth:128);
+  const opts = ['<option value="">— select wav —</option>'].concat(
+    (files||[]).map(f=>{
+      const sel = f.name===ev.file ? ' selected' : '';
+      return `<option value="${esc(f.name)}"${sel}>${esc(f.name)}</option>`;
+    })
+  ).join('');
+  const kb = ev.bytes ? (ev.bytes/1024).toFixed(1)+' KB' : 'no file';
+  return `<div class="card" data-evt-root="${esc(ev.id)}" style="margin:.55rem 0;padding:.65rem;border:1px solid var(--line);border-radius:10px">
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:space-between">
+      <div>
+        <b>${esc(ev.label||ev.id)}</b>
+        <span style="color:var(--mut);font-size:12px"> · ${esc(ev.id)} · ${esc(kb)}</span>
+      </div>
+      <label class="toggle-row" style="margin:0"><input type="checkbox" data-evt-en="${esc(ev.id)}" ${ev.enabled?'checked':''}/> Enabled</label>
+    </div>
+    <label style="margin-top:.4rem">WAV file</label>
+    <select data-evt-file="${esc(ev.id)}" style="width:100%">${opts}</select>
+    <div class="row" style="margin-top:.35rem;gap:.35rem;flex-wrap:wrap">
+      <button type="button" data-evt-select="${esc(ev.id)}">Use selected file</button>
+      <button type="button" data-evt-play="${esc(ev.id)}">Play</button>
+    </div>
+    <h3 style="margin:.7rem 0 .25rem;font-size:14px">Record with TTS</h3>
+    <div class="hint">Same SAM controls as Voice — adjust, play, then save as this event’s wav.</div>
+    <label>Phrase</label>
+    <input data-evt-text="${esc(ev.id)}" type="text" maxlength="200" value="${esc(ev.tts_text||'')}" placeholder="ouch"/>
+    <div class="row" style="gap:.4rem;flex-wrap:wrap;margin-top:.35rem">
+      <div style="flex:1;min-width:4.5rem"><label>Vol</label><input data-tts="volume" type="number" min="0" max="100" value="${vol}"/></div>
+      <div style="flex:1;min-width:4.5rem"><label>Pitch</label><input data-tts="pitch" type="number" min="0" max="255" value="${pitch}"/></div>
+      <div style="flex:1;min-width:4.5rem"><label>Speed</label><input data-tts="speed" type="number" min="0" max="255" value="${speed}"/></div>
+      <div style="flex:1;min-width:4.5rem"><label>Throat</label><input data-tts="throat" type="number" min="0" max="255" value="${throat}"/></div>
+      <div style="flex:1;min-width:4.5rem"><label>Mouth</label><input data-tts="mouth" type="number" min="0" max="255" value="${mouth}"/></div>
+    </div>
+    <div class="row" style="margin-top:.4rem;gap:.35rem;flex-wrap:wrap">
+      <button type="button" class="primary" data-evt-record="${esc(ev.id)}">Record + save + play</button>
+      <button type="button" data-evt-preview="${esc(ev.id)}">Preview TTS only</button>
+      <button type="button" data-evt-copy-tts="${esc(ev.id)}">Copy global TTS</button>
+    </div>
+    <div class="hint" data-evt-msg="${esc(ev.id)}" style="margin-top:.3rem"></div>
+  </div>`;
+}
+async function refreshSounds(){
+  const st=$('snd-st');
+  try{
+    const j=await rock('/api/v1/sounds');
+    soundState.files = j.files||[];
+    soundState.events = j.events||[];
+    if(j.limits && j.limits.max_upload_bytes) soundState.maxBytes = j.limits.max_upload_bytes;
+    if(j.tts_defaults){
+      soundState.tts = Object.assign({}, soundState.tts, j.tts_defaults);
+      /* only fill empty form if not already loaded */
+      if($('spk-volume') && !$('spk-volume').dataset.touched)
+        applyTtsToForm(j.tts_defaults);
+    }
+    if(st) st.innerHTML =
+      `<div><span>dir</span> ${esc(j.dir||'')}</div>`+
+      `<div><span>events</span> ${(j.events||[]).length} · <span>files</span> ${(j.files||[]).length}</div>`;
+    const lim=$('snd-limits');
+    if(lim){
+      const mb=(soundState.maxBytes/1024).toFixed(0);
+      lim.innerHTML = `Format: <b>WAV</b> only · max <b>${mb} KB</b> per clip · <code>${esc(j.dir||'')}</code>`;
+    }
+    const box=$('snd-events');
+    if(box){
+      if(!(j.events||[]).length) box.innerHTML='<div class="hint">No events.</div>';
+      else box.innerHTML = j.events.map(ev=>renderEventCard(ev, j.files)).join('');
+      box.querySelectorAll('[data-evt-en]').forEach(cb=>{
+        cb.onchange=async()=>{
+          const id=cb.dataset.evtEn;
+          try{
+            await soundsPut({action:'config', event:id, enabled:!!cb.checked});
+            const m=box.querySelector('[data-evt-msg="'+id+'"]');
+            if(m) m.textContent=cb.checked?'Enabled':'Disabled';
+          }catch(e){ alert(e.message); }
+        };
+      });
+      box.querySelectorAll('[data-evt-select]').forEach(b=>{
+        b.onclick=async()=>{
+          const id=b.dataset.evtSelect;
+          const sel=box.querySelector('[data-evt-file="'+id+'"]');
+          const file=sel&&sel.value;
+          if(!file){ alert('Pick a WAV first'); return; }
+          try{
+            await soundsPut({action:'select', event:id, file});
+            const m=box.querySelector('[data-evt-msg="'+id+'"]');
+            if(m) m.textContent='Using '+file;
+            await refreshSounds();
+          }catch(e){ alert(e.message); }
+        };
+      });
+      box.querySelectorAll('[data-evt-play]').forEach(b=>{
+        b.onclick=async()=>{
+          const id=b.dataset.evtPlay;
+          try{
+            await soundsPut({action:'play', event:id});
+            const m=box.querySelector('[data-evt-msg="'+id+'"]');
+            if(m) m.textContent='Playing…';
+          }catch(e){ alert(e.message); }
+        };
+      });
+      box.querySelectorAll('[data-evt-copy-tts]').forEach(b=>{
+        b.onclick=()=>{
+          const id=b.dataset.evtCopyTts;
+          const root=box.querySelector('[data-evt-root="'+id+'"]');
+          const t=ttsFromForm();
+          if(!root) return;
+          ['volume','pitch','speed','throat','mouth'].forEach(k=>{
+            const el=root.querySelector('[data-tts="'+k+'"]');
+            if(el && t[k]!=null) el.value=t[k];
+          });
+          const m=box.querySelector('[data-evt-msg="'+id+'"]');
+          if(m) m.textContent='Copied global TTS into this event.';
+        };
+      });
+      box.querySelectorAll('[data-evt-preview]').forEach(b=>{
+        b.onclick=async()=>{
+          const id=b.dataset.evtPreview;
+          const textEl=box.querySelector('[data-evt-text="'+id+'"]');
+          const text=((textEl&&textEl.value)||'').trim();
+          if(!text){ alert('Type a phrase first'); return; }
+          const t=ttsFromEventCard(id);
+          const m=box.querySelector('[data-evt-msg="'+id+'"]');
+          if(m) m.textContent='Preview TTS…';
+          try{
+            await rock('/api/v1/assist/speak/test',{
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({text, volume:t.volume, pitch:t.pitch, speed:t.speed, throat:t.throat, mouth:t.mouth, force:true, wait:true})
+            });
+            if(m) m.textContent='Preview played (not saved).';
+          }catch(e){ if(m) m.textContent='preview: '+e.message; }
+        };
+      });
+      box.querySelectorAll('[data-evt-record]').forEach(b=>{
+        b.onclick=async()=>{
+          const id=b.dataset.evtRecord;
+          const textEl=box.querySelector('[data-evt-text="'+id+'"]');
+          const text=((textEl&&textEl.value)||'').trim();
+          if(!text){ alert('Type a phrase to record'); return; }
+          const t=ttsFromEventCard(id);
+          const m=box.querySelector('[data-evt-msg="'+id+'"]');
+          if(m) m.textContent='Recording…';
+          try{
+            const j=await soundsPut({
+              action:'record', event:id, text, play:true,
+              volume:t.volume, pitch:t.pitch, speed:t.speed, throat:t.throat, mouth:t.mouth
+            });
+            if(m) m.textContent='Saved '+j.file+' ('+((j.bytes||0)/1024).toFixed(1)+' KB) and assigned to '+id;
+            await refreshSounds();
+          }catch(e){ if(m) m.textContent='record: '+e.message; }
+        };
+      });
+    }
+    const fbox=$('snd-files');
+    if(fbox){
+      const files=j.files||[];
+      if(!files.length) fbox.innerHTML='<div class="hint">Library empty — upload or record TTS.</div>';
+      else fbox.innerHTML = files.map(f=>{
+        const kb=f.bytes!=null?(f.bytes/1024).toFixed(1)+'K':'';
+        return `<div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin:.3rem 0">`+
+          `<span style="flex:1;min-width:8rem">${esc(f.name)} <span style="color:var(--mut)">${kb}</span></span>`+
+          `<button type="button" data-snd-play="${esc(f.name)}">Play</button>`+
+          `<button type="button" class="bad" data-snd-del="${esc(f.name)}">Delete</button></div>`;
+      }).join('');
+      fbox.querySelectorAll('[data-snd-play]').forEach(b=>{
+        b.onclick=async()=>{
+          try{ await soundsPut({action:'play', file:b.dataset.sndPlay}); }
+          catch(e){ alert(e.message); }
+        };
+      });
+      fbox.querySelectorAll('[data-snd-del]').forEach(b=>{
+        b.onclick=async()=>{
+          if(!confirm('Delete “'+b.dataset.sndDel+'” from robot?')) return;
+          try{
+            const r=await fetch(cfg().rock+'/api/v1/sounds/files/'+encodeURIComponent(b.dataset.sndDel),{method:'DELETE'});
+            const t=await r.text();
+            let jj; try{jj=JSON.parse(t);}catch(e){jj={};}
+            if(!r.ok) throw new Error(jj.error||t||r.status);
+            await refreshSounds();
+          }catch(e){ alert(e.message); }
+        };
+      });
+    }
+  }catch(e){ if(st) st.textContent='sounds: '+e.message; }
+}
+if($('snd-refresh')) $('snd-refresh').onclick=()=>refreshSounds();
+if($('spk-volume')) $('spk-volume').addEventListener('input',()=>{ $('spk-volume').dataset.touched='1'; });
+if($('snd-upload')) $('snd-upload').onclick=async()=>{
+  const inp=$('snd-file');
+  const f=inp&&inp.files&&inp.files[0];
+  const msg=$('snd-up-msg');
+  if(!f){ if(msg) msg.textContent='Choose a .wav file first.'; return; }
+  const maxB = soundState.maxBytes || SND_MAX_DEFAULT;
+  if(f.size > maxB){ if(msg) msg.textContent='File too large (max '+(maxB/1024).toFixed(0)+' KB).'; return; }
+  const name=safeWavName(f.name);
+  if(msg) msg.textContent='Uploading '+name+'…';
+  try{
+    const buf=await f.arrayBuffer();
+    const r=await fetch(cfg().rock+'/api/v1/sounds/upload?name='+encodeURIComponent(name),{
+      method:'POST',
+      headers:{'Content-Type':'application/octet-stream','X-Filename':name},
+      body:buf
+    });
+    const t=await r.text();
+    let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
+    if(!r.ok) throw new Error(j.error||t||r.status);
+    if(msg) msg.textContent='Uploaded '+j.name+' ('+j.bytes+' bytes)';
+    if(inp) inp.value='';
+    await refreshSounds();
+  }catch(e){ if(msg) msg.textContent='upload: '+e.message; }
 };
 
 $('music-upload').onclick=async()=>{

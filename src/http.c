@@ -333,6 +333,63 @@ static int safe_track_name(const char *name, char *out, size_t n) {
   return 0;
 }
 
+/* Event sound library: /mnt/data/rockctl/sounds + per-event config under sounds/events/<id>/ */
+#define SOUNDS_DIR "/mnt/data/rockctl/sounds"
+#define SOUNDS_EVT_DIR "/mnt/data/rockctl/sounds/events"
+#define SOUNDS_MAX_UPLOAD (512 * 1024) /* 512 KB short clips */
+
+static int safe_event_id(const char *name, char *out, size_t n) {
+  if (!name || !name[0] || strstr(name, "..") || strchr(name, '/') || strchr(name, '\\'))
+    return -1;
+  size_t L = strlen(name);
+  if (L < 1 || L > 32) return -1;
+  for (const char *p = name; *p; p++) {
+    unsigned char c = (unsigned char)*p;
+    if (!(isalnum(c) || c == '_' || c == '-')) return -1;
+  }
+  snprintf(out, n, "%s", name);
+  return 0;
+}
+
+static void sounds_ensure_dirs(void) {
+  mkdir("/mnt/data/rockctl", 0755);
+  mkdir(SOUNDS_DIR, 0755);
+  mkdir(SOUNDS_EVT_DIR, 0755);
+}
+
+static void sounds_evt_path(char *out, size_t n, const char *evt, const char *leaf) {
+  snprintf(out, n, "%s/%s/%s", SOUNDS_EVT_DIR, evt, leaf);
+}
+
+static void sounds_read_evt(const char *evt, const char *leaf, char *out, size_t n, const char *def) {
+  char p[256];
+  sounds_evt_path(p, sizeof p, evt, leaf);
+  read_small(p, out, n, def);
+}
+
+static void sounds_write_evt(const char *evt, const char *leaf, const char *val) {
+  char dir[256], p[288];
+  snprintf(dir, sizeof dir, "%s/%s", SOUNDS_EVT_DIR, evt);
+  mkdir(dir, 0755);
+  sounds_evt_path(p, sizeof p, evt, leaf);
+  write_small(p, val);
+}
+
+/* Known event catalog (id, human label). Wired: ouch. Others are config-only until a watcher uses them. */
+static const struct { const char *id; const char *label; const char *def_file; } SOUND_EVENTS[] = {
+  { "ouch", "Obstacle / bumper hit", "ouch.wav" },
+  { "dock", "Docked / returned home", "" },
+  { "start_clean", "Start cleaning", "" },
+  { "done_clean", "Cleaning finished", "" },
+  { "low_battery", "Low battery", "" },
+  { NULL, NULL, NULL }
+};
+
+static void sounds_sync_ouch_enabled(const char *en) {
+  /* Keep legacy ouch_enabled file in sync for older tooling */
+  write_small("/mnt/data/rockctl/ouch_enabled", en && en[0] ? en : "1");
+}
+
 static void ensure_music_watchdog(void) {
   run_sh("mkdir -p /mnt/data/rockctl/music; "
          "if [ -x /mnt/data/rockctl/bin/clean_music_loop.sh ]; then W=/mnt/data/rockctl/bin/clean_music_loop.sh; "
@@ -2137,6 +2194,517 @@ static void handle(int cfd, miio_client *m) {
         "{\"ok\":true,\"type\":\"%s\",\"cycles\":%d,\"fan\":\"%s\",\"water\":\"%s\"}",
         type, cycles, fan, water);
       resp(cfd, 200, "application/json", b);
+    }
+
+  /* ----- Event sounds library + per-event config (ClankerDash Sounds) ----- */
+  } else if (is_get && !strcmp(path, "/api/v1/sounds")) {
+    sounds_ensure_dirs();
+    /* list wav files in sounds/ */
+    char files[2048]; size_t fo = 0; files[0] = 0;
+    fo += (size_t)snprintf(files + fo, sizeof files - fo, "[");
+    int ffirst = 1;
+    DIR *d = opendir(SOUNDS_DIR);
+    if (d) {
+      struct dirent *de;
+      while ((de = readdir(d)) != NULL) {
+        size_t nl = strlen(de->d_name);
+        if (nl < 5) continue;
+        const char *dot = strrchr(de->d_name, '.');
+        if (!dot || strcasecmp(dot, ".wav") != 0) continue;
+        /* skip nested dirs named oddly */
+        char pathm[320];
+        snprintf(pathm, sizeof pathm, "%s/%s", SOUNDS_DIR, de->d_name);
+        struct stat st;
+        if (stat(pathm, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (fo + 96 >= sizeof files) break;
+        fo += (size_t)snprintf(files + fo, sizeof files - fo,
+          "%s{\"name\":\"%s\",\"bytes\":%ld}", ffirst ? "" : ",", de->d_name, (long)st.st_size);
+        ffirst = 0;
+      }
+      closedir(d);
+    }
+    fo += (size_t)snprintf(files + fo, sizeof files - fo, "]");
+
+    /* events */
+    char events[4096]; size_t eo = 0; events[0] = 0;
+    eo += (size_t)snprintf(events + eo, sizeof events - eo, "[");
+    int efirst = 1;
+    for (int i = 0; SOUND_EVENTS[i].id; i++) {
+      const char *id = SOUND_EVENTS[i].id;
+      char en[16], file[96], tts_text[200], vol[16], pitch[16], speed[16], throat[16], mouth[16];
+      sounds_read_evt(id, "enabled", en, sizeof en, "1");
+      sounds_read_evt(id, "file", file, sizeof file, SOUND_EVENTS[i].def_file);
+      sounds_read_evt(id, "tts_text", tts_text, sizeof tts_text, "");
+      sounds_read_evt(id, "tts_volume", vol, sizeof vol, "");
+      sounds_read_evt(id, "tts_pitch", pitch, sizeof pitch, "");
+      sounds_read_evt(id, "tts_speed", speed, sizeof speed, "");
+      sounds_read_evt(id, "tts_throat", throat, sizeof throat, "");
+      sounds_read_evt(id, "tts_mouth", mouth, sizeof mouth, "");
+      /* legacy ouch_enabled overrides if present for ouch */
+      if (!strcmp(id, "ouch")) {
+        char leg[16];
+        read_small("/mnt/data/rockctl/ouch_enabled", leg, sizeof leg, "");
+        if (leg[0]) snprintf(en, sizeof en, "%s", leg);
+      }
+      int enabled = 1;
+      if (en[0] == '0' || !strcasecmp(en, "off") || !strcasecmp(en, "false") || !strcasecmp(en, "no"))
+        enabled = 0;
+      char full[320] = "";
+      long bytes = 0;
+      int has_file = 0;
+      if (file[0]) {
+        snprintf(full, sizeof full, "%s/%s", SOUNDS_DIR, file);
+        struct stat st;
+        if (stat(full, &st) == 0 && S_ISREG(st.st_mode)) {
+          has_file = 1;
+          bytes = (long)st.st_size;
+        }
+      }
+      /* escape tts_text for JSON (minimal) */
+      char tts_esc[220]; size_t ti = 0;
+      for (const char *p = tts_text; *p && ti + 2 < sizeof tts_esc; p++) {
+        if (*p == '"' || *p == '\\') tts_esc[ti++] = '\\';
+        if ((unsigned char)*p >= 32) tts_esc[ti++] = *p;
+      }
+      tts_esc[ti] = 0;
+      if (eo + 400 >= sizeof events) break;
+      eo += (size_t)snprintf(events + eo, sizeof events - eo,
+        "%s{\"id\":\"%s\",\"label\":\"%s\",\"enabled\":%s,"
+        "\"file\":\"%s\",\"has_file\":%s,\"bytes\":%ld,"
+        "\"tts_text\":\"%s\","
+        "\"tts\":{\"volume\":%s,\"pitch\":%s,\"speed\":%s,\"throat\":%s,\"mouth\":%s}}",
+        efirst ? "" : ",",
+        id, SOUND_EVENTS[i].label,
+        enabled ? "true" : "false",
+        file[0] ? file : "",
+        has_file ? "true" : "false", bytes,
+        tts_esc,
+        vol[0] ? vol : "null",
+        pitch[0] ? pitch : "null",
+        speed[0] ? speed : "null",
+        throat[0] ? throat : "null",
+        mouth[0] ? mouth : "null");
+      efirst = 0;
+    }
+    eo += (size_t)snprintf(events + eo, sizeof events - eo, "]");
+
+    /* TTS defaults from speak.env */
+    int volume = 35, pitch = 64, speed = 72, throat = 128, mouth = 128, speaken = 0;
+    {
+      FILE *ef = fopen("/mnt/data/nanobot/speak.env", "r");
+      if (ef) {
+        char line[256];
+        while (fgets(line, sizeof line, ef)) {
+          if (!strncmp(line, "SPEAK_ENABLED=", 14))
+            speaken = (line[14] == '1' || !strncmp(line + 14, "on", 2) || !strncmp(line + 14, "true", 4));
+          else if (!strncmp(line, "SPEAK_VOLUME=", 13)) volume = atoi(line + 13);
+          else if (!strncmp(line, "SAM_PITCH=", 10)) pitch = atoi(line + 10);
+          else if (!strncmp(line, "SAM_SPEED=", 10)) speed = atoi(line + 10);
+          else if (!strncmp(line, "SAM_THROAT=", 11)) throat = atoi(line + 11);
+          else if (!strncmp(line, "SAM_MOUTH=", 10)) mouth = atoi(line + 10);
+        }
+        fclose(ef);
+      }
+    }
+    if (volume < 0) volume = 0;
+    if (volume > 100) volume = 100;
+
+    char body[7200];
+    snprintf(body, sizeof body,
+      "{\"ok\":true,\"dir\":\"%s\","
+      "\"files\":%s,\"events\":%s,"
+      "\"tts_defaults\":{\"enabled\":%s,\"volume\":%d,\"pitch\":%d,\"speed\":%d,\"throat\":%d,\"mouth\":%d},"
+      "\"limits\":{\"max_upload_bytes\":%d,\"formats\":[\"wav\"]},"
+      "\"note\":\"select file or TTS-record per event; ouch plays configured wav on bumper\"}",
+      SOUNDS_DIR, files, events,
+      speaken ? "true" : "false", volume, pitch, speed, throat, mouth,
+      SOUNDS_MAX_UPLOAD);
+    resp(cfd, 200, "application/json", body);
+
+  } else if ((is_post || is_put) && !strcmp(path, "/api/v1/sounds")) {
+    char *body = strstr(req, "\r\n\r\n");
+    body = body ? body + 4 : "";
+    sounds_ensure_dirs();
+    char action[24] = {0}, event[40] = {0}, file[96] = {0}, text[220] = {0};
+    json_str(body, "action", action, sizeof action);
+    json_str(body, "event", event, sizeof event);
+    if (!event[0]) json_str(body, "id", event, sizeof event);
+    json_str(body, "file", file, sizeof file);
+    if (!file[0]) json_str(body, "name", file, sizeof file);
+    json_str(body, "text", text, sizeof text);
+    if (!text[0]) json_str(body, "tts_text", text, sizeof text);
+
+    int volume = 35, pitch = 64, speed = 72, throat = 128, mouth = 128;
+    {
+      FILE *ef = fopen("/mnt/data/nanobot/speak.env", "r");
+      if (ef) {
+        char line[256];
+        while (fgets(line, sizeof line, ef)) {
+          if (!strncmp(line, "SPEAK_VOLUME=", 13)) volume = atoi(line + 13);
+          else if (!strncmp(line, "SAM_PITCH=", 10)) pitch = atoi(line + 10);
+          else if (!strncmp(line, "SAM_SPEED=", 10)) speed = atoi(line + 10);
+          else if (!strncmp(line, "SAM_THROAT=", 11)) throat = atoi(line + 11);
+          else if (!strncmp(line, "SAM_MOUTH=", 10)) mouth = atoi(line + 10);
+        }
+        fclose(ef);
+      }
+    }
+    json_int(body, "volume", &volume);
+    json_int(body, "pitch", &pitch);
+    json_int(body, "speed", &speed);
+    json_int(body, "throat", &throat);
+    json_int(body, "mouth", &mouth);
+    if (volume < 0) volume = 0;
+    if (volume > 100) volume = 100;
+
+    int play = 1;
+    {
+      const char *w = strstr(body, "\"play\"");
+      if (w) {
+        w = strchr(w, ':');
+        if (w) {
+          while (*w && (*w == ':' || *w == ' ' || *w == '\t')) w++;
+          if (!strncmp(w, "false", 5) || w[0] == '0') play = 0;
+        }
+      }
+    }
+    int has_enabled = 0, enabled = 1;
+    {
+      const char *e = strstr(body, "\"enabled\"");
+      if (e) {
+        e = strchr(e, ':');
+        if (e) {
+          while (*e && (*e == ':' || *e == ' ' || *e == '\t')) e++;
+          has_enabled = 1;
+          if (!strncmp(e, "false", 5) || e[0] == '0') enabled = 0;
+          else enabled = 1;
+        }
+      }
+    }
+
+    /* action aliases from fields alone */
+    if (!action[0]) {
+      if (text[0] && event[0]) snprintf(action, sizeof action, "record");
+      else if (file[0] && event[0]) snprintf(action, sizeof action, "select");
+      else if (event[0] && has_enabled) snprintf(action, sizeof action, "config");
+      else if (file[0] || event[0]) snprintf(action, sizeof action, "play");
+    }
+
+    char evt[40];
+    if (event[0] && safe_event_id(event, evt, sizeof evt) != 0) {
+      resp(cfd, 400, "application/json", "{\"error\":\"bad event id\"}");
+      free(req); close(cfd); return;
+    }
+    if (!event[0]) evt[0] = 0;
+
+    if (!strcmp(action, "config") || !strcmp(action, "select") || !strcmp(action, "enable") ||
+        !strcmp(action, "disable")) {
+      if (!evt[0]) {
+        resp(cfd, 400, "application/json", "{\"error\":\"need event\"}");
+        free(req); close(cfd); return;
+      }
+      if (!strcmp(action, "enable")) { has_enabled = 1; enabled = 1; }
+      if (!strcmp(action, "disable")) { has_enabled = 1; enabled = 0; }
+      if (has_enabled) {
+        sounds_write_evt(evt, "enabled", enabled ? "1" : "0");
+        if (!strcmp(evt, "ouch")) sounds_sync_ouch_enabled(enabled ? "1" : "0");
+      }
+      if (file[0] || !strcmp(action, "select")) {
+        char safe[96];
+        if (file[0] && safe_track_name(file, safe, sizeof safe) != 0) {
+          resp(cfd, 400, "application/json", "{\"error\":\"need safe .wav file name\"}");
+          free(req); close(cfd); return;
+        }
+        if (file[0]) {
+          char full[320];
+          snprintf(full, sizeof full, "%s/%s", SOUNDS_DIR, safe);
+          if (access(full, R_OK) != 0) {
+            resp(cfd, 404, "application/json", "{\"error\":\"file not in sounds library\"}");
+            free(req); close(cfd); return;
+          }
+          sounds_write_evt(evt, "file", safe);
+          /* ouch_watcher default path still ouch.wav — write active pointer + keep symlink alias */
+          if (!strcmp(evt, "ouch")) {
+            write_small("/mnt/data/rockctl/sounds/ouch.active", safe);
+          }
+        }
+      }
+      if (text[0]) sounds_write_evt(evt, "tts_text", text);
+      {
+        char buf[16];
+        snprintf(buf, sizeof buf, "%d", volume); sounds_write_evt(evt, "tts_volume", buf);
+        snprintf(buf, sizeof buf, "%d", pitch); sounds_write_evt(evt, "tts_pitch", buf);
+        snprintf(buf, sizeof buf, "%d", speed); sounds_write_evt(evt, "tts_speed", buf);
+        snprintf(buf, sizeof buf, "%d", throat); sounds_write_evt(evt, "tts_throat", buf);
+        snprintf(buf, sizeof buf, "%d", mouth); sounds_write_evt(evt, "tts_mouth", buf);
+      }
+      char out[240];
+      char curfile[96];
+      sounds_read_evt(evt, "file", curfile, sizeof curfile, "");
+      snprintf(out, sizeof out,
+        "{\"ok\":true,\"saved\":true,\"event\":\"%s\",\"file\":\"%s\",\"enabled\":%s}",
+        evt, curfile, enabled ? "true" : "false");
+      resp(cfd, 200, "application/json", out);
+      free(req); close(cfd); return;
+    }
+
+    if (!strcmp(action, "play")) {
+      char wavpath[320] = {0};
+      if (file[0]) {
+        char safe[96];
+        if (safe_track_name(file, safe, sizeof safe) != 0) {
+          resp(cfd, 400, "application/json", "{\"error\":\"bad file name\"}");
+          free(req); close(cfd); return;
+        }
+        snprintf(wavpath, sizeof wavpath, "%s/%s", SOUNDS_DIR, safe);
+      } else if (evt[0]) {
+        char f[96];
+        sounds_read_evt(evt, "file", f, sizeof f, !strcmp(evt, "ouch") ? "ouch.wav" : "");
+        if (!f[0]) {
+          resp(cfd, 404, "application/json", "{\"error\":\"event has no file\"}");
+          free(req); close(cfd); return;
+        }
+        snprintf(wavpath, sizeof wavpath, "%s/%s", SOUNDS_DIR, f);
+      } else {
+        resp(cfd, 400, "application/json", "{\"error\":\"need event or file\"}");
+        free(req); close(cfd); return;
+      }
+      if (access(wavpath, R_OK) != 0) {
+        resp(cfd, 404, "application/json", "{\"error\":\"wav not found\"}");
+        free(req); close(cfd); return;
+      }
+      {
+        char cmd[640];
+        snprintf(cmd, sizeof cmd,
+          "HOME=/mnt/data/rockctl LD_LIBRARY_PATH=/mnt/data/audio-bin/lib "
+          "/mnt/data/audio-bin/bin/aplay -D clanker '%s' >/dev/null 2>&1 &",
+          wavpath);
+        /* wavpath is under SOUNDS_DIR with safe name only — no shell metachar */
+        run_sh(cmd);
+      }
+      resp(cfd, 200, "application/json",
+           "{\"ok\":true,\"played\":true,\"where\":\"robot\"}");
+      free(req); close(cfd); return;
+    }
+
+    if (!strcmp(action, "record")) {
+      if (!evt[0]) {
+        resp(cfd, 400, "application/json", "{\"error\":\"need event for record\"}");
+        free(req); close(cfd); return;
+      }
+      if (!text[0]) {
+        sounds_read_evt(evt, "tts_text", text, sizeof text, "");
+      }
+      if (!text[0]) {
+        resp(cfd, 400, "application/json", "{\"error\":\"need text to record\"}");
+        free(req); close(cfd); return;
+      }
+      /* default out name: <event>_tts.wav or provided file */
+      char safe[96];
+      if (file[0]) {
+        if (safe_track_name(file, safe, sizeof safe) != 0) {
+          resp(cfd, 400, "application/json", "{\"error\":\"bad output file name\"}");
+          free(req); close(cfd); return;
+        }
+      } else {
+        snprintf(safe, sizeof safe, "%s_tts.wav", evt);
+      }
+      char outpath[320];
+      snprintf(outpath, sizeof outpath, "%s/%s", SOUNDS_DIR, safe);
+      /* write text to temp for stdin */
+      char inpath[72];
+      snprintf(inpath, sizeof inpath, "/dev/shm/samrec.%u.in", (unsigned)getpid());
+      {
+        FILE *tf = fopen(inpath, "w");
+        if (!tf) {
+          resp(cfd, 500, "application/json", "{\"error\":\"cannot write temp text\"}");
+          free(req); close(cfd); return;
+        }
+        fputs(text, tf);
+        fclose(tf);
+      }
+      char recbin[128];
+      if (access("/mnt/data/rockctl/bin/sam_record.sh", X_OK) == 0)
+        snprintf(recbin, sizeof recbin, "/mnt/data/rockctl/bin/sam_record.sh");
+      else if (access("/mnt/data/nanobot-wrapper/speak/sam_record.sh", X_OK) == 0)
+        snprintf(recbin, sizeof recbin, "/mnt/data/nanobot-wrapper/speak/sam_record.sh");
+      else {
+        /* fall back: inline SAM via speak home */
+        snprintf(recbin, sizeof recbin, "/mnt/data/rockctl/bin/sam_record.sh");
+      }
+      if (access(recbin, X_OK) != 0) {
+        unlink(inpath);
+        resp(cfd, 503, "application/json",
+             "{\"error\":\"sam_record.sh not installed on robot\"}");
+        free(req); close(cfd); return;
+      }
+      {
+        char cmd[1200];
+        snprintf(cmd, sizeof cmd,
+          "HOME=/mnt/data/rockctl "
+          "SPEAK_ENV=/mnt/data/nanobot/speak.env "
+          "SPEAK_HOME=/mnt/data/nanobot-wrapper/speak "
+          "SPEAK_ALSA_DEVICE=clanker "
+          "PATH=/mnt/data/nanobot-wrapper/speak/bin:/mnt/data/audio-bin/bin:/usr/bin:/bin "
+          "LD_LIBRARY_PATH=/mnt/data/audio-bin/lib "
+          "SAM_BIN=/mnt/data/nanobot-wrapper/speak/bin/sam "
+          "APLAY_BIN=/mnt/data/audio-bin/bin/aplay "
+          "WAV_VOL_BIN=/mnt/data/nanobot-wrapper/speak/bin/wav_vol "
+          "SPEAK_TMPDIR=/dev/shm "
+          "%s --out %s %s --volume %d --pitch %d --speed %d --throat %d --mouth %d "
+          "<%s >>/mnt/data/nanobot-wrapper/speak/speak.log 2>&1; "
+          "rc=$?; rm -f %s; exit $rc",
+          recbin, outpath, play ? "--play" : "",
+          volume, pitch, speed, throat, mouth, inpath, inpath);
+        int rc = run_sh(cmd);
+        if (rc != 0 || access(outpath, R_OK) != 0) {
+          char err[200];
+          snprintf(err, sizeof err,
+            "{\"ok\":false,\"error\":\"record failed (exit %d) — see speak.log\"}", rc);
+          resp(cfd, 500, "application/json", err);
+          free(req); close(cfd); return;
+        }
+      }
+      /* save event binding + last TTS params */
+      sounds_write_evt(evt, "file", safe);
+      sounds_write_evt(evt, "tts_text", text);
+      {
+        char buf[16];
+        snprintf(buf, sizeof buf, "%d", volume); sounds_write_evt(evt, "tts_volume", buf);
+        snprintf(buf, sizeof buf, "%d", pitch); sounds_write_evt(evt, "tts_pitch", buf);
+        snprintf(buf, sizeof buf, "%d", speed); sounds_write_evt(evt, "tts_speed", buf);
+        snprintf(buf, sizeof buf, "%d", throat); sounds_write_evt(evt, "tts_throat", buf);
+        snprintf(buf, sizeof buf, "%d", mouth); sounds_write_evt(evt, "tts_mouth", buf);
+      }
+      if (has_enabled) {
+        sounds_write_evt(evt, "enabled", enabled ? "1" : "0");
+        if (!strcmp(evt, "ouch")) sounds_sync_ouch_enabled(enabled ? "1" : "0");
+      }
+      if (!strcmp(evt, "ouch"))
+        write_small("/mnt/data/rockctl/sounds/ouch.active", safe);
+      struct stat st; long bytes = 0;
+      if (stat(outpath, &st) == 0) bytes = (long)st.st_size;
+      char out[320];
+      snprintf(out, sizeof out,
+        "{\"ok\":true,\"recorded\":true,\"event\":\"%s\",\"file\":\"%s\",\"bytes\":%ld,"
+        "\"played\":%s,\"volume\":%d,\"pitch\":%d,\"speed\":%d,\"throat\":%d,\"mouth\":%d}",
+        evt, safe, bytes, play ? "true" : "false",
+        volume, pitch, speed, throat, mouth);
+      resp(cfd, 200, "application/json", out);
+      free(req); close(cfd); return;
+    }
+
+    resp(cfd, 400, "application/json",
+         "{\"error\":\"action config|select|play|record|enable|disable\"}");
+    free(req); close(cfd); return;
+
+  } else if (is_post && !strcmp(path, "/api/v1/sounds/upload")) {
+    /* Raw WAV body for event sound library */
+    char name[96] = {0};
+    const char *sp1 = strchr(req, ' ');
+    const char *sp2 = sp1 ? strchr(sp1 + 1, ' ') : NULL;
+    if (sp1 && sp2) {
+      for (const char *q = sp1; q < sp2; q++) {
+        if (q[0] == '?' || (q[0] == 'n' && strncmp(q, "name=", 5) == 0)) {
+          const char *np = strstr(q, "name=");
+          if (np && np < sp2) {
+            np += 5; size_t i = 0;
+            while (np[i] && np[i] != '&' && np[i] != ' ' && i + 1 < sizeof name) {
+              name[i] = np[i]; i++;
+            }
+            name[i] = 0;
+          }
+          break;
+        }
+      }
+    }
+    if (!name[0]) {
+      const char *h = strstr(req, "X-Filename:");
+      if (!h) h = strstr(req, "x-filename:");
+      if (h) {
+        h = strchr(h, ':');
+        if (h) {
+          h++;
+          while (*h == ' ' || *h == '\t') h++;
+          size_t i = 0;
+          while (h[i] && h[i] != '\r' && h[i] != '\n' && i + 1 < sizeof name) {
+            name[i] = h[i]; i++;
+          }
+          name[i] = 0;
+        }
+      }
+    }
+    char safe[96];
+    if (safe_track_name(name, safe, sizeof safe) != 0) {
+      resp(cfd, 400, "application/json",
+           "{\"error\":\"need safe name ending in .wav (?name=clip.wav)\"}");
+      free(req); close(cfd); return;
+    }
+    size_t cl = 0;
+    const char *clh = strstr(req, "Content-Length:");
+    if (!clh) clh = strstr(req, "content-length:");
+    if (clh) cl = (size_t)strtoul(clh + 15, NULL, 10);
+    if (cl < 44 || cl > SOUNDS_MAX_UPLOAD) {
+      resp(cfd, 400, "application/json",
+           "{\"error\":\"bad Content-Length (wav 44B..512KB)\"}");
+      free(req); close(cfd); return;
+    }
+    char *hdrend = strstr(req, "\r\n\r\n");
+    if (!hdrend) {
+      resp(cfd, 400, "application/json", "{\"error\":\"bad request\"}");
+      free(req); close(cfd); return;
+    }
+    char *bdy = hdrend + 4;
+    size_t hlen = (size_t)(bdy - req);
+    size_t available = (req_len > hlen) ? req_len - hlen : 0;
+    if (available < cl) {
+      resp(cfd, 400, "application/json", "{\"error\":\"incomplete body\"}");
+      free(req); close(cfd); return;
+    }
+    sounds_ensure_dirs();
+    char pathm[320];
+    snprintf(pathm, sizeof pathm, "%s/%s", SOUNDS_DIR, safe);
+    FILE *wf = fopen(pathm, "wb");
+    if (!wf) {
+      resp(cfd, 500, "application/json", "{\"error\":\"write failed\"}");
+      free(req); close(cfd); return;
+    }
+    size_t wr = fwrite(bdy, 1, cl, wf);
+    fclose(wf);
+    if (wr != cl) {
+      unlink(pathm);
+      resp(cfd, 500, "application/json", "{\"error\":\"short write\"}");
+      free(req); close(cfd); return;
+    }
+    if (cl >= 12 && !(bdy[0] == 'R' && bdy[1] == 'I' && bdy[2] == 'F' && bdy[3] == 'F' &&
+                      bdy[8] == 'W' && bdy[9] == 'A' && bdy[10] == 'V' && bdy[11] == 'E')) {
+      unlink(pathm);
+      resp(cfd, 400, "application/json", "{\"error\":\"not a WAV file (need RIFF/WAVE)\"}");
+      free(req); close(cfd); return;
+    }
+    char out[280];
+    snprintf(out, sizeof out,
+      "{\"ok\":true,\"name\":\"%s\",\"bytes\":%zu,"
+      "\"limits\":{\"max_upload_bytes\":%d,\"formats\":[\"wav\"]}}",
+      safe, cl, SOUNDS_MAX_UPLOAD);
+    resp(cfd, 200, "application/json", out);
+
+  } else if (is_del && !strncmp(path, "/api/v1/sounds/files/", 21)) {
+    const char *tn = path + 21;
+    char safe[96];
+    if (safe_track_name(tn, safe, sizeof safe) != 0) {
+      resp(cfd, 400, "application/json", "{\"error\":\"bad file name\"}");
+    } else {
+      /* refuse deleting only file still referenced? allow delete; events may show has_file=false */
+      char pathm[320];
+      snprintf(pathm, sizeof pathm, "%s/%s", SOUNDS_DIR, safe);
+      if (unlink(pathm) != 0 && errno != ENOENT) {
+        resp(cfd, 500, "application/json", "{\"error\":\"delete failed\"}");
+      } else {
+        char out[160];
+        snprintf(out, sizeof out, "{\"ok\":true,\"deleted\":\"%s\"}", safe);
+        resp(cfd, 200, "application/json", out);
+      }
     }
 
   } else if (is_get && !strcmp(path,"/openapi.yaml")) {

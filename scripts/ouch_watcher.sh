@@ -16,6 +16,10 @@ WAV="${OUCH_WAV:-$ROOT/sounds/ouch.wav}"
 APLAY="${OUCH_APLAY:-/mnt/data/audio-bin/bin/aplay}"
 export LD_LIBRARY_PATH="/mnt/data/audio-bin/lib:/usr/lib/arm-linux-gnueabihf:${LD_LIBRARY_PATH:-}"
 ENABLED_FILE="${OUCH_ENABLED_FILE:-$ROOT/ouch_enabled}"
+# Per-event config from ClankerDash /api/v1/sounds (preferred when present)
+EVT_EN_FILE="${OUCH_EVT_ENABLED:-$ROOT/sounds/events/ouch/enabled}"
+EVT_FILE_CFG="${OUCH_EVT_FILE:-$ROOT/sounds/events/ouch/file}"
+ACTIVE_FILE="${OUCH_ACTIVE_FILE:-$ROOT/sounds/ouch.active}"
 POLL_MS="${OUCH_POLL_MS:-200}"
 COOLDOWN_MS="${OUCH_COOLDOWN_MS:-900}"
 MCU_LOG="${OUCH_MCU_LOG:-/run/shm/MCU_normal.log}"
@@ -29,8 +33,39 @@ log() {
   fi
 }
 
+# Resolve WAV from ClankerDash event config each hit (live without restart)
+resolve_wav() {
+  name=""
+  if [ -f "$EVT_FILE_CFG" ]; then
+    name=$(cat "$EVT_FILE_CFG" 2>/dev/null | tr -d ' \t\r\n')
+  fi
+  if [ -z "$name" ] && [ -f "$ACTIVE_FILE" ]; then
+    name=$(cat "$ACTIVE_FILE" 2>/dev/null | tr -d ' \t\r\n')
+  fi
+  # basename only — no path traversal
+  name=$(printf '%s' "$name" | sed 's|.*/||; s|\\||g')
+  case "$name" in
+    ""|*..*|*"/"*|*"\\"*) name="" ;;
+  esac
+  if [ -n "$name" ] && [ -s "$ROOT/sounds/$name" ]; then
+    WAV="$ROOT/sounds/$name"
+    return 0
+  fi
+  if [ -s "${OUCH_WAV:-$ROOT/sounds/ouch.wav}" ]; then
+    WAV="${OUCH_WAV:-$ROOT/sounds/ouch.wav}"
+    return 0
+  fi
+  WAV="$ROOT/sounds/ouch.wav"
+}
+
 is_enabled() {
   if [ "${OUCH_ENABLED:-}" = "0" ] || [ "${OUCH_ENABLED:-}" = "off" ]; then return 1; fi
+  # Prefer per-event toggle from ClankerDash
+  if [ -f "$EVT_EN_FILE" ]; then
+    v=$(cat "$EVT_EN_FILE" 2>/dev/null | tr -d ' \t\r\n' | tr 'A-Z' 'a-z')
+    case "$v" in 0|off|false|no) return 1 ;; esac
+    return 0
+  fi
   if [ -f "$ENABLED_FILE" ]; then
     v=$(cat "$ENABLED_FILE" 2>/dev/null | tr -d ' \t\r\n' | tr 'A-Z' 'a-z')
     case "$v" in 0|off|false|no) return 1 ;; esac
@@ -166,9 +201,10 @@ OUCH_PCM="${OUCH_PCM:-clanker_quiet}"
 
 play_ouch() {
   reason="$1"
+  resolve_wav
   [ -x "$APLAY" ] || { log "no aplay"; return 1; }
   [ -s "$WAV" ] || { log "no wav $WAV"; return 1; }
-  log "HIT reason=$reason → OUCH pcm=$OUCH_PCM"
+  log "HIT reason=$reason → OUCH pcm=$OUCH_PCM wav=$WAV"
   HOME="$ROOT" "$APLAY" -D "$OUCH_PCM" "$WAV" >/dev/null 2>&1 &
   ap=$!
   i=0
@@ -256,7 +292,8 @@ for pair in "MCU:$MCU_LOG" "EVT:$EVT_LOG"; do
   fi
 done
 
-log "ouch_watcher start poll=${POLL_MS}ms cooldown=${COOLDOWN_MS}ms strict=bumper/LightTouch wav=$WAV"
+resolve_wav
+log "ouch_watcher start poll=${POLL_MS}ms cooldown=${COOLDOWN_MS}ms strict=bumper/LightTouch wav=$WAV (live config)"
 last_ouch_ms=0
 prev_bumper=0
 
