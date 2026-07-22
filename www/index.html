@@ -112,6 +112,7 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
     <button type="button" data-t="music">Music</button>
     <button type="button" data-t="sounds">Sounds</button>
     <button type="button" data-t="schedule">Schedule</button>
+    <button type="button" data-t="train">Train</button>
     <button type="button" data-t="settings">Settings</button>
     <button type="button" data-t="assist">Assistant</button>
   </nav>
@@ -209,7 +210,9 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
           <button type="button" id="map-follow" title="Keep view centered on robot while moving">Follow</button>
           <span id="map-zoom-lbl">100%</span>
           <button type="button" id="map-refresh">Refresh</button>
-          <a class="btn" id="map-export" href="#" download="last_map.bin">Export</a>
+          <a class="btn" id="map-export" href="#" download="last_map.bin">Export map</a>
+          <button type="button" id="map-export-drive" title="Download last drive JSON">Drive JSON</button>
+          <button type="button" id="map-load-drive" title="Reload last drive + coverage">Path</button>
         </div>
         <div id="map-legend">
           <span><i style="background:#3ddc97"></i>dock</span>
@@ -220,6 +223,8 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
           <span><i style="background:#f5f5f2;border:1px solid #555;border-radius:2px"></i>floor</span>
           <span><i style="background:#1c1c20;border-radius:2px"></i>wall</span>
           <span><i style="background:#28a0ff;border-radius:2px"></i>path</span>
+          <span><i style="background:#a3e635;border-radius:2px"></i>last drive</span>
+          <span><i style="background:#e879f9;border-radius:2px"></i>map coverage</span>
         </div>
         <div id="map-msg">Loading… open this tab or press Refresh.</div>
         <div class="kv" id="map-meta" style="margin-top:.4rem"></div>
@@ -527,14 +532,81 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
         </div>
         <div class="kv" id="cfg-improve-st" style="margin-top:.4rem"></div>
       </div>
+      <div class="card">
+        <h2>Restart / reboot</h2>
+        <div class="hint">
+          Cleanly restarts lab services on this robot so train + assist + rockctl come back healthy.
+          <b>Restart stack</b> = halt RC → restart assist + train session → rockctl (watchdog respawns).
+          <b>Reboot robot</b> = full OS reboot (Wi‑Fi + services come up via boot scripts). Confirm first.
+        </div>
+        <div class="row" style="gap:.4rem;flex-wrap:wrap;margin-top:.35rem">
+          <button type="button" class="primary" id="cfg-restart-stack">Restart stack</button>
+          <button type="button" id="cfg-restart-assist">Restart assist</button>
+          <button type="button" id="cfg-restart-train">Restart train</button>
+          <button type="button" id="cfg-reboot" style="border-color:#c44;color:#f88">Reboot robot…</button>
+        </div>
+        <div class="kv" id="cfg-restart-st" style="margin-top:.4rem;color:var(--mut)"></div>
+      </div>
       <p class="foot">ClankerDash talks to one robot host: rockctl (control) + assist (optional). No separate IP per service.</p>
       </div><!-- #settings-body -->
+    </section>
+
+    <section id="p-train" class="page">
+      <div class="card">
+        <h2>BrainCube / CubeChain train</h2>
+        <div class="hint">
+          <b>Real session</b> = <code>lhlam teach --live</code> continuous RC hold + bumper teacher + path log.
+          Not a restart script. Path length + acc must move. Map tab shows drive path after a cycle.
+        </div>
+        <div class="row" style="gap:.35rem;flex-wrap:wrap;margin:.35rem 0">
+          <button type="button" class="primary" id="tr-start">Start live teach</button>
+          <button type="button" class="bad" id="tr-stop">Stop</button>
+          <button type="button" class="cyan" id="tr-explore">Same (live teach)</button>
+          <button type="button" id="tr-explore-off">Stop</button>
+          <button type="button" id="tr-field-on">Live teach</button>
+          <button type="button" id="tr-field-off">Stop</button>
+          <button type="button" id="tr-refresh">Refresh</button>
+        </div>
+        <div class="row" style="gap:.35rem;flex-wrap:wrap">
+          <button type="button" id="tr-agent-on">Agent service on</button>
+          <button type="button" id="tr-agent-off">Agent off</button>
+          <button type="button" id="tr-export">Export brain</button>
+          <button type="button" class="bad" id="tr-reset">Reset brain</button>
+        </div>
+        <div class="kv" id="tr-metrics" style="margin-top:.5rem">…</div>
+        <div class="hint" id="tr-st" style="margin-top:.35rem">idle</div>
+      </div>
+      <div class="card">
+        <h2>Results (what it tried)</h2>
+        <div class="hint">One-liners: action → clear/bump/docked. Attention-only learn never moves.</div>
+        <div class="kv" id="tr-latest" style="margin:.35rem 0;padding:.45rem;border:1px solid var(--line);border-radius:8px;background:#0d1318"></div>
+        <pre id="tr-trials" style="max-height:12rem;overflow:auto;font-size:11px;margin:0;white-space:pre-wrap;word-break:break-word;color:var(--mut)"></pre>
+      </div>
+      <div class="card">
+        <h2>Supervise / structure</h2>
+        <div class="row" style="gap:.35rem;flex-wrap:wrap;align-items:center">
+          <select id="tr-want" style="width:auto;min-width:7rem">
+            <option value="free_ok">free_ok</option>
+            <option value="charge">charge</option>
+            <option value="state">state</option>
+            <option value="battery">battery</option>
+            <option value="bump_L">bump_L</option>
+            <option value="bump_C">bump_C</option>
+            <option value="bump_R">bump_R</option>
+            <option value="error">error</option>
+          </select>
+          <input id="tr-ttl" type="number" min="10" max="300" value="40" style="width:4rem"/>
+          <button type="button" class="primary" id="tr-supervise">Supervise</button>
+        </div>
+        <canvas id="tr-canvas" width="640" height="280" style="width:100%;max-width:100%;height:auto;margin-top:.5rem;background:#0b0e14;border-radius:8px;border:1px solid var(--line);touch-action:none"></canvas>
+        <div class="hint">Net graph of Meta + sensors (live). Drag not required.</div>
+      </div>
     </section>
 
     <section id="p-assist" class="page">
       <div class="card">
         <h2>Assistant services</h2>
-        <div class="hint" id="assist-hint">Control nanobot on the robot. Web UI link opens advanced settings in a new tab.</div>
+        <div class="hint" id="assist-hint">Control nanobot on the robot. Training is under the <b>Train</b> tab on this dash (no extra port). Web UI link is optional advanced peer pages only.</div>
         <div class="kv" id="assist-status" style="margin:.4rem 0">…</div>
         <div class="row" style="margin:.5rem 0 .35rem;gap:.5rem;flex-wrap:wrap">
           <button type="button" id="assist-tog" data-svc="assist">Assist · …</button>
@@ -767,12 +839,225 @@ function showTab(name){
   if(name==='sounds'){ refreshSpeak(); refreshSounds(); }
   if(name==='schedule') loadSchedule();
   if(name==='assist') refreshAssistServices();
+  if(name==='train'){ trStart(); }
+  else if(trTimer){ clearInterval(trTimer); trTimer=null; }
 }
+
+/* ----- Train tab (BrainCube via assist peer API — same host, no dash port) ----- */
+let trTimer=null, trLast=null, trInFlight=false;
+async function trApi(action, extra){
+  const body=Object.assign({action}, extra||{});
+  return peerJson('/api/braincube', {
+    method:'POST',
+    headers: peerHeaders(),
+    body: JSON.stringify(body)
+  });
+}
+function trDrawNet(j){
+  const c=$('tr-canvas'); if(!c||!j) return;
+  const ctx=c.getContext('2d');
+  const W=c.width, H=c.height;
+  ctx.fillStyle='#0b0e14'; ctx.fillRect(0,0,W,H);
+  const sensors=j.sensors||[], meta=j.meta||{};
+  const cx=W/2, cy=H*0.48, R=Math.min(W,H)*0.30;
+  sensors.forEach((s,i)=>{
+    const a=-Math.PI/2+(i/Math.max(1,sensors.length))*Math.PI*2;
+    const x=cx+Math.cos(a)*R, y=cy+Math.sin(a)*R;
+    const act=Math.max(0.08, Math.min(1, s.activity||0));
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(x,y);
+    ctx.strokeStyle=s.fire?`rgba(0,229,255,${0.35+0.55*act})`:`rgba(100,120,140,${0.15+0.25*act})`;
+    ctx.lineWidth=s.fire?2.5:1; ctx.stroke();
+  });
+  const ma=Math.max(0.2, Math.min(1, meta.activity||0.3));
+  ctx.beginPath(); ctx.arc(cx,cy,26+ma*10,0,Math.PI*2);
+  ctx.fillStyle=`rgba(61,220,151,${0.25+0.5*ma})`; ctx.fill();
+  ctx.strokeStyle='#3ddc97'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#e8ffe8'; ctx.font='bold 11px system-ui'; ctx.textAlign='center';
+  ctx.fillText('META', cx, cy-2);
+  ctx.font='10px system-ui'; ctx.fillStyle='#3ddc97';
+  ctx.fillText(meta.pick_name||'?', cx, cy+12);
+  sensors.forEach((s,i)=>{
+    const a=-Math.PI/2+(i/Math.max(1,sensors.length))*Math.PI*2;
+    const x=cx+Math.cos(a)*R, y=cy+Math.sin(a)*R;
+    const act=Math.max(0.1, Math.min(1, s.activity||0));
+    ctx.beginPath(); ctx.arc(x,y,14+act*8,0,Math.PI*2);
+    ctx.fillStyle=s.fire?`rgba(255,107,107,${0.35+0.45*act})`:`rgba(0,229,255,${0.2+0.4*act})`;
+    ctx.fill();
+    ctx.strokeStyle=s.fire?'#ff6b6b':'#00e5ff'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#eef'; ctx.font='bold 9px system-ui'; ctx.textAlign='center';
+    ctx.fillText(s.name||('s'+i), x, y-1);
+    ctx.font='8px system-ui'; ctx.fillStyle='#7a8a94';
+    ctx.fillText('a'+(s.acc!=null?Number(s.acc).toFixed(2):'?'), x, y+10);
+  });
+  ctx.fillStyle='#7a8a94'; ctx.font='10px system-ui'; ctx.textAlign='left';
+  const w=j.world||{};
+  ctx.fillText(`seq ${j.seq||0}  bat ${w.battery??'?'} ch ${w.charge??'?'}  self ${j.self_teaches||0} agent ${j.agent_teaches||0}`, 10, H-10);
+}
+async function trRefresh(){
+  if(trInFlight) return;
+  trInFlight=true;
+  const st=$('tr-st'), met=$('tr-metrics');
+  try{
+    /* Prefer cheap rockctl file status — no peer shell spam */
+    try{
+      const j=await rock('/api/v1/train/status',{timeoutMs:2000});
+      if(j && j.ok){
+        if(met){
+          const rep=j.report||'';
+          const sess=j.session?JSON.stringify(j.session):'';
+          met.innerHTML='<div style="white-space:pre-wrap;font-size:11px">'+
+            esc((sess+'\n'+rep).slice(0,1200))+'</div>';
+        }
+        if(st) st.textContent=j.running?'train running ('+(j.mode||'?')+')':'train idle';
+        if($('tr-latest')) $('tr-latest').innerHTML=
+          '<div class="hint">'+(j.running?'Session active — RC only if mode is rc_teach.':'Stopped. Start clean-observe (default) or optional RC teach.')+'</div>';
+        trInFlight=false;
+        return;
+      }
+    }catch(e0){}
+    /* fallback: one short peer shell, no multi-API fanout */
+    try{
+      const sh=await trPeerShell(
+        'cat /mnt/data/nanobot/braincube/session_status.json 2>/dev/null; echo; '+
+        'cat /mnt/data/nanobot/braincube/last_report.txt 2>/dev/null | head -c 400'
+      );
+      const txt=(sh&&(sh.stdout||sh.output||sh.result||sh.raw))||'';
+      if(met && txt) met.innerHTML='<div style="white-space:pre-wrap;font-size:11px">'+esc(String(txt).slice(0,1200))+'</div>';
+      if(st) st.textContent=String(txt).indexOf('running')>=0?'session via peer':'idle / peer';
+    }catch(se){
+      if(st) st.textContent='train: '+se.message;
+    }
+  }catch(e){
+    if(st) st.textContent='train: '+e.message;
+  }finally{
+    trInFlight=false;
+  }
+}
+function trStart(){
+  if(trTimer) clearInterval(trTimer);
+  trRefresh();
+  /* 6s train poll — peer shell is expensive; do not stack */
+  trTimer=setInterval(()=>{ if(!document.hidden) trRefresh(); }, 6000);
+}
+if($('tr-refresh')) $('tr-refresh').onclick=()=>trRefresh();
+/* Real session = lhlam continuous-hold teach on robot (not flag-pulse theater). */
+async function trPeerShell(cmd){
+  return peerJson('/peer/v1/shell',{
+    method:'POST', headers:peerHeaders(),
+    body:JSON.stringify({command:cmd})
+  });
+}
+if($('tr-start')) $('tr-start').onclick=async()=>{
+  if($('tr-st')) $('tr-st').textContent='starting real lhlam session…';
+  try{
+    await trPeerShell(
+      'killall -9 field_trial_loop.sh field_trial_watchdog.sh train_agent_loop.sh 2>/dev/null; '+
+      'rm -f /mnt/data/nanobot/braincube/field_trials.flag /mnt/data/nanobot/braincube/explore.flag; '+
+      'if [ -f /mnt/data/lhlam/session.pid ]; then kill $(cat /mnt/data/lhlam/session.pid) 2>/dev/null; fi; '+
+      'export ROCKCTL_URL=http://127.0.0.1:8080 SESSION_TICKS=24 SESSION_PULSE_MS=1400 SESSION_SPEED=med; '+
+      'cd /mnt/data/lhlam && nohup ./scripts/session_loop.sh >>lab/logs/session_loop.out 2>&1 & echo $! >session.pid; '+
+      'echo started $(cat session.pid)'
+    );
+    try{ await trApi('session_start',{note:'lhlam_live'}); }catch(e){}
+    trStart();
+  }catch(e){ if($('tr-st')) $('tr-st').textContent=e.message; }
+};
+if($('tr-stop')) $('tr-stop').onclick=async()=>{
+  try{
+    await trPeerShell(
+      'rm -f /mnt/data/lhlam/session.flag; '+
+      'kill $(cat /mnt/data/lhlam/session.pid 2>/dev/null) 2>/dev/null; '+
+      'killall -9 lhlam field_trial_loop.sh 2>/dev/null; '+
+      'echo stopped'
+    );
+    try{ await trApi('session_stop'); }catch(e){}
+    trRefresh();
+  }catch(e){ if($('tr-st')) $('tr-st').textContent=e.message; }
+};
+if($('tr-explore')) $('tr-explore').onclick=async()=>{
+  if(!confirm('Start REAL self-learning drive (lhlam continuous hold)? Robot will move. Stop with Stop.')) return;
+  $('tr-start').click();
+};
+if($('tr-explore-off')) $('tr-explore-off').onclick=async()=>{
+  $('tr-stop').click();
+};
+if($('tr-field-on')) $('tr-field-on').onclick=async()=>{
+  /* alias: real session, not shell theater */
+  $('tr-start').click();
+};
+if($('tr-field-off')) $('tr-field-off').onclick=async()=>{
+  $('tr-stop').click();
+};
+if($('tr-agent-on')) $('tr-agent-on').onclick=async()=>{ try{ await trApi('agent_service',{value:'1'}); trRefresh(); }catch(e){ if($('tr-st')) $('tr-st').textContent=e.message; } };
+if($('tr-agent-off')) $('tr-agent-off').onclick=async()=>{ try{ await trApi('agent_service',{value:'0'}); trRefresh(); }catch(e){ if($('tr-st')) $('tr-st').textContent=e.message; } };
+if($('tr-supervise')) $('tr-supervise').onclick=async()=>{
+  try{
+    await trApi('supervise',{want:($('tr-want')&&$('tr-want').value)||'free_ok', ttl_sec:parseInt(($('tr-ttl')&&$('tr-ttl').value)||'40',10), note:'dash'});
+    trRefresh();
+  }catch(e){ if($('tr-st')) $('tr-st').textContent=e.message; }
+};
+if($('tr-export')) $('tr-export').onclick=async()=>{
+  try{
+    const j=await trApi('export');
+    if(j&&j.data){
+      try{ await navigator.clipboard.writeText(j.data); if($('tr-st')) $('tr-st').textContent='exported '+j.bytes+' B (copied)'; }
+      catch(ce){ if($('tr-st')) $('tr-st').textContent='exported '+j.bytes+' B'; }
+    } else if($('tr-st')) $('tr-st').textContent='export failed';
+  }catch(e){ if($('tr-st')) $('tr-st').textContent=e.message; }
+};
+if($('tr-reset')) $('tr-reset').onclick=async()=>{
+  if(!confirm('Reset BrainCube on robot?')) return;
+  try{ await trApi('reset'); trRefresh(); }catch(e){ if($('tr-st')) $('tr-st').textContent=e.message; }
+};
 /** Reload map pixels without resetting pan/zoom/pick (for live path). */
 let mapQuietBusy = false;
 let mapFollowRobot = false;
 let mapRobotTrail = []; // crop-local {px,py,t} recent positions
+let mapLastDrive = null; // {points:[{cx,cy}|{sx,sy}|{px,py}], kind, issues}
+let mapCoverage = null;  // RRSLAM path extract for last clean coverage
+
 let mapLastState = null;
+
+
+async function loadDriveOverlays(){
+  try{
+    const j = await rock('/api/v1/drive/last');
+    if(j && (j.points||j.path)){
+      mapLastDrive = {
+        points: j.points || j.path || [],
+        issues: j.issues || [],
+        kind: j.kind || j.mode || 'last',
+        meta: j
+      };
+    }
+  }catch(e){ /* no last drive yet */ }
+  try{
+    const c = await rock('/api/v1/drive/coverage');
+    if(c && c.ok && Array.isArray(c.points)) mapCoverage = c;
+  }catch(e){}
+  try{ drawMap(); }catch(e){}
+  // update meta line
+  const el=$('map-msg');
+  if(el && mapLastDrive && mapLastDrive.points && mapLastDrive.points.length){
+    const n=mapLastDrive.points.length;
+    const iss=(mapLastDrive.issues&&mapLastDrive.issues.length)||0;
+    el.textContent = `Last drive: ${n} pts · issues ${iss} · kind ${mapLastDrive.kind||'?'}` +
+      (mapCoverage&&mapCoverage.n?` · map coverage ${mapCoverage.n} cells`:'');
+  }
+}
+
+function exportDriveJson(){
+  const blob = new Blob([JSON.stringify({
+    last_drive: mapLastDrive,
+    coverage: mapCoverage,
+    exported_at: new Date().toISOString()
+  }, null, 2)], {type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='clanker_last_drive.json';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+}
 
 async function refreshMapQuiet(){
   if(!mapMeta||!cfg().rock || mapQuietBusy) return;
@@ -903,12 +1188,26 @@ function centerOnCropPx(px, py, z){
 }
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
 
+/** rockctl fetch with hard timeout so a stuck miio never freezes the SPA. */
 async function rock(path, opt){
-  const r = await fetch(cfg().rock + path, opt);
-  const t = await r.text();
-  let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
-  if(!r.ok) throw new Error(j.error||t||r.status);
-  return j;
+  const ms = (opt && opt.timeoutMs != null) ? opt.timeoutMs : 3500;
+  const ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const tmo = ac ? setTimeout(()=>ac.abort(), ms) : null;
+  try{
+    const o = Object.assign({}, opt||{});
+    delete o.timeoutMs;
+    if(ac) o.signal = ac.signal;
+    const r = await fetch(cfg().rock + path, o);
+    const t = await r.text();
+    let j; try{j=JSON.parse(t);}catch(e){j={raw:t};}
+    if(!r.ok) throw new Error(j.error||t||r.status);
+    return j;
+  }catch(e){
+    if(e && e.name==='AbortError') throw new Error('timeout '+path+' ('+ms+'ms)');
+    throw e;
+  }finally{
+    if(tmo) clearTimeout(tmo);
+  }
 }
 
 function parseStatus(j){ return (j.result&&j.result[0])||j; }
@@ -950,10 +1249,11 @@ function labelWater(lvl){
   return ({off:'Off',low:'Low',medium:'Medium',high:'High'})[lvl]||lvl||'?';
 }
 
+let statusInFlight=false, statusPollN=0, lastResAt=0;
 async function refreshResources(){
   const el=$('res'); if(!el) return;
   try{
-    const j=await rock('/api/v1/resources');
+    const j=await rock('/api/v1/resources',{timeoutMs:2500});
     const mb=k=>((k||0)/1024).toFixed(1)+'M';
     const warn=j.warn?' <span class="bad">WARN</span>':'';
     const ng=j.services&&j.services.nanobot;
@@ -962,11 +1262,15 @@ async function refreshResources(){
       `<div><span>data free</span> ${mb(j.data_free_kb)} / ${mb(j.data_total_kb)}</div>`+
       `<div><span>load</span> ${j.load1} ${j.load5} ${j.load15}</div>`+
       `<div><span>nanobot</span> ${ng&&ng.alive?('rss '+ng.rss_kb+'k'):'down'} · <span>rockctl</span> ok</div>`;
+    lastResAt=Date.now();
   }catch(e){ el.textContent='resources: '+e.message; }
 }
 async function refreshStatus(){
+  if(statusInFlight) return;
+  if(typeof document!=='undefined' && document.hidden) return;
+  statusInFlight=true;
   try{
-    const j = await rock('/api/v1/status');
+    const j = await rock('/api/v1/status',{timeoutMs:3000});
     const r = parseStatus(j);
     const label = STATES[r.state]||('state '+r.state);
     const fanLvl = fanLevelFromStatus(r);
@@ -979,13 +1283,13 @@ async function refreshStatus(){
     const waterTxt = waterLvl
       ? `${labelWater(waterLvl)} (${r.water_box_mode??r.water_box_status??'?'})`
       : String(r.water_box_mode??r.water_box_status??'?');
-    $('status').innerHTML =
+    if($('status')) $('status').innerHTML =
       `<div><span>state</span> ${label} (${r.state})</div>`+
       `<div><span>battery</span> ${r.battery!=null?r.battery+'%':'?'}</div>`+
       `<div><span>suction</span> ${fanTxt} · <span>moist</span> ${waterTxt}</div>`+
       `<div><span>clean</span> ${r.in_cleaning??'?'} · <span>return</span> ${r.in_returning??'?'} · <span>mop dock</span> ${r.water_box_carriage_status??'?'}</div>`+
       `<div><span>manual</span> ${Number(r.state)===7?'RC on':'off'}</div>`;
-    $('pill').innerHTML =
+    if($('pill')) $('pill').innerHTML =
       `<span class="ok">${label}</span> · ${r.battery!=null?r.battery+'%':''}`+
       (fanLvl?` · ${labelFan(fanLvl)}`:'')+
       (waterLvl?` · mop ${labelWater(waterLvl)}`:'')+
@@ -1000,33 +1304,47 @@ async function refreshStatus(){
       if(!manual.holdDir && typeof manualSetStatus==='function')
         manualSetStatus('idle · not in manual mode', false);
     }
-    refreshResources();
+    /* resources: every 4th status or ≥30s — not every poll */
+    statusPollN++;
+    if(statusPollN%4===1 || (Date.now()-lastResAt)>30000) refreshResources();
   }catch(e){
-    $('status').textContent='status error: '+e.message;
-    $('pill').innerHTML='<span class="bad">offline</span>';
+    if($('status')) $('status').textContent='status error: '+e.message;
+    if($('pill')) $('pill').innerHTML='<span class="bad">offline</span>';
     markSegment('[data-fan]', null);
     markSegment('[data-water]', null);
+  }finally{
+    statusInFlight=false;
   }
 }
 
 async function control(action){
   try{
-    await rock('/api/v1/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
-    setTimeout(refreshStatus,700);
+    /* async by default on robot — 202, no miio wait in HTTP */
+    await rock('/api/v1/control',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action}), timeoutMs:2500
+    });
+    setTimeout(refreshStatus,900);
   }catch(e){ alert(action+' failed: '+e.message); }
 }
 async function fan(level){
   try{
-    markSegment('[data-fan]', level); // optimistic
-    await rock('/api/v1/fan',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({level})});
-    setTimeout(refreshStatus,400);
+    markSegment('[data-fan]', level); // optimistic UI
+    await rock('/api/v1/fan',{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({level}), timeoutMs:2500
+    });
+    setTimeout(refreshStatus,600);
   }catch(e){ alert('fan: '+e.message); refreshStatus(); }
 }
 async function water(level){
   try{
     markSegment('[data-water]', level); // optimistic
-    await rock('/api/v1/water',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({level})});
-    setTimeout(refreshStatus,400);
+    await rock('/api/v1/water',{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({level}), timeoutMs:2500
+    });
+    setTimeout(refreshStatus,600);
   }catch(e){ alert('moist: '+e.message); refreshStatus(); }
 }
 document.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>control(b.dataset.act));
@@ -1049,7 +1367,8 @@ function manualMarkSpeed(){
 }
 async function manualApi(body){
   try{
-    return await rock('/api/v1/manual',{
+    body = Object.assign({async:true}, body||{});
+    return await rock('/api/v1/manual/async',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(body)
@@ -1441,6 +1760,52 @@ function drawMap(){
     const p=slamToPixel(mapMeta.start.x, mapMeta.start.y);
     mark(p.px, p.py, '#ffb020', '#3a2800', 7);
   }
+  // Last drive / lab path (persisted coverage for users + analysis)
+  if(mapLastDrive && mapLastDrive.points && mapLastDrive.points.length>1){
+    ctx.beginPath();
+    let started=false;
+    for(const pt of mapLastDrive.points){
+      let loc=null;
+      if(pt.px!=null && pt.py!=null) loc={px:pt.px, py:pt.py};
+      else if(pt.cx!=null && pt.cy!=null){ const l=fullToLocal(pt.cx, pt.cy); loc={px:l.px+0.5, py:l.py+0.5}; }
+      else if(pt.sx!=null && pt.sy!=null){ loc=slamToPixel(pt.sx, pt.sy); }
+      if(!loc) continue;
+      const sc=mapToScreen(loc.px, loc.py);
+      if(!started){ ctx.moveTo(sc.x, sc.y); started=true; }
+      else ctx.lineTo(sc.x, sc.y);
+    }
+    ctx.strokeStyle='rgba(163,230,53,0.9)';
+    ctx.lineWidth=3.5;
+    ctx.lineJoin='round';
+    ctx.lineCap='round';
+    ctx.stroke();
+    // issue markers
+    if(Array.isArray(mapLastDrive.issues)){
+      for(const iss of mapLastDrive.issues){
+        let loc=null;
+        if(iss.px!=null) loc={px:iss.px,py:iss.py};
+        else if(iss.cx!=null){ const l=fullToLocal(iss.cx,iss.cy); loc={px:l.px+0.5,py:l.py+0.5}; }
+        else if(iss.sx!=null) loc=slamToPixel(iss.sx,iss.sy);
+        if(!loc) continue;
+        const sc=mapToScreen(loc.px,loc.py);
+        ctx.beginPath();
+        ctx.arc(sc.x, sc.y, 6, 0, Math.PI*2);
+        ctx.fillStyle='rgba(248,113,113,0.9)';
+        ctx.fill();
+      }
+    }
+  }
+  // Map-layer coverage (last clean path cells)
+  if(mapCoverage && mapCoverage.points && mapCoverage.points.length){
+    for(const pt of mapCoverage.points){
+      if(pt.cx==null) continue;
+      const l=fullToLocal(pt.cx, pt.cy);
+      const sc=mapToScreen(l.px+0.5, l.py+0.5);
+      const a = pt.v<=7 ? 0.55 : 0.28;
+      ctx.fillStyle=`rgba(232,121,249,${a})`;
+      ctx.fillRect(sc.x-1.5, sc.y-1.5, 3, 3);
+    }
+  }
   // short movement trail (recent quiet-refresh positions)
   if(mapRobotTrail && mapRobotTrail.length>1){
     ctx.beginPath();
@@ -1596,6 +1961,7 @@ async function refreshMap(){
       }
     }catch(e){ mapPlaces=[]; }
     drawMap();
+    loadDriveOverlays();
     const dockPx = mapMeta.charger ? slamToPixel(mapMeta.charger.x, mapMeta.charger.y) : null;
     $('map-meta').innerHTML =
       `<div><span>slot</span> ${mapName} · <span>size</span> ${mapCrop.w}×${mapCrop.h} (full ${w}×${h})</div>`+
@@ -3388,6 +3754,38 @@ $('cfg-improve-status').onclick=async()=>{
   }catch(e){ $('cfg-improve-st').textContent='failed: '+e.message; }
 };
 
+/* ----- restart / reboot (Settings) ----- */
+async function systemAction(action, confirmMsg){
+  const st=$('cfg-restart-st');
+  if(confirmMsg && !window.confirm(confirmMsg)){
+    if(st) st.textContent='cancelled';
+    return;
+  }
+  saveCfg(readCfgForm());
+  if(st) st.textContent='sending '+action+'…';
+  try{
+    const j=await rock('/api/v1/system',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action})
+    });
+    const note=(j&& (j.note||j.error))||JSON.stringify(j);
+    if(st) st.textContent=(j&&j.ok?'ok: ':'')+note;
+    if(action==='restart_stack'||action==='reboot'){
+      if(st) st.textContent+=' — dash may disconnect; refresh in 15–60s';
+    }
+  }catch(e){
+    if(st) st.textContent='failed: '+e.message+' (if stack restart, rockctl may already be cycling — refresh)';
+  }
+}
+if($('cfg-restart-stack')) $('cfg-restart-stack').onclick=()=>systemAction('restart_stack',
+  'Restart stack on the robot?\n\nHalts RC, restarts assist + train session, then rockctl (watchdog brings it back).');
+if($('cfg-restart-assist')) $('cfg-restart-assist').onclick=()=>systemAction('restart_assist');
+if($('cfg-restart-train')) $('cfg-restart-train').onclick=()=>systemAction('restart_train',
+  'Restart train session (lhlam session_loop)?');
+if($('cfg-reboot')) $('cfg-reboot').onclick=()=>systemAction('reboot',
+  'REBOOT the vacuum OS?\n\nRC will halt, disk sync, then full reboot. Dash offline until boot finishes.');
+
 /* ----- assistant ----- */
 function add(cls,t){ const d=document.createElement('div'); d.className=cls; d.textContent=t; $('log').appendChild(d); $('log').scrollTop=$('log').scrollHeight; }
 async function ask(){
@@ -3416,19 +3814,35 @@ async function ask(){
 $('ask').onclick=ask;
 $('q').addEventListener('keydown',e=>{ if(e.key==='Enter') ask(); });
 
-(async function boot(){
-  fillCfg();
-  await hydrateFromServer();
+/* Boot: paint shell immediately; never block first paint on miio status. */
+(function boot(){
   fillCfg();
   updateAssistHint();
-  if(!cfg().rock){
-    const p=$('pill'); if(p) p.innerHTML='<span class="warn">set robot host in Settings</span>';
-    const st=$('status'); if(st) st.textContent='Configure endpoints (no default lab IP).';
-  }else{
-    await refreshStatus();
-    setInterval(refreshStatus, 5000);
+  if($('pill') && cfg().rock) $('pill').innerHTML='<span class="warn">…</span>';
+  /* config hydrate + first status in background */
+  Promise.resolve().then(async()=>{
+    try{ await hydrateFromServer(); fillCfg(); updateAssistHint(); }catch(e){}
+    if(!cfg().rock){
+      if($('pill')) $('pill').innerHTML='<span class="warn">set robot host in Settings</span>';
+      if($('status')) $('status').textContent='Configure endpoints (no default lab IP).';
+      return;
+    }
+    refreshStatus(); /* no await — UI already interactive */
+  });
+  /* slower poll: 12s visible, pause when tab hidden */
+  setInterval(()=>{
+    if(typeof document!=='undefined' && document.hidden) return;
+    refreshStatus();
+  }, 12000);
+  if(typeof document!=='undefined'){
+    document.addEventListener('visibilitychange',()=>{
+      if(!document.hidden) refreshStatus();
+    });
   }
 })();
+
+if($('map-export-drive')) $('map-export-drive').onclick = ()=>exportDriveJson();
+if($('map-load-drive')) $('map-load-drive').onclick = ()=>{ loadDriveOverlays(); $('map-msg').textContent='Reloading drive path…'; };
 </script>
 </body>
 </html>

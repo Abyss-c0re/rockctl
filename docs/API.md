@@ -25,13 +25,29 @@ Base URL: `http://<robot>:8080`
 | GET | `/api/v1/status` | — | `get_status` miio result |
 | GET | `/api/v1/consumable` | — | Consumables |
 | POST | `/api/v1/control` | `{"action":"start\|stop\|pause\|home\|spot\|locate\|rc_start\|rc_end"}` | Basic control (+ manual aliases) |
-| POST | `/api/v1/manual` | `{"action":"start\|stop\|forward\|back\|left\|right\|halt\|move",…}` | Remote control (no clean) |
+| POST | `/api/v1/manual` | `{"action":"start\|stop\|forward\|back\|left\|right\|halt\|move",…}` | Remote control (no clean); add `"async":true` for non-blocking |
+| POST | `/api/v1/manual/async` | same body | Always **202** + detached miio (client never waits on UDP) |
 | PUT | `/api/v1/fan` | `{"level":"quiet\|balanced\|turbo\|max"}` | Fan / suction preset |
 | PUT | `/api/v1/water` | `{"level":"off\|low\|medium\|high"}` | Mop moisture (water box) |
 | GET | `/api/v1/schedule` | — | Cleaning jobs (`/mnt/data/rockctl/schedule.json`) |
 | PUT | `/api/v1/schedule` | `{"ok":true,"jobs":[…]}` or one job | Persist schedule (survives reboot) |
 | DELETE | `/api/v1/schedule` | — | Clear all jobs |
 | POST | `/api/v1/raw` | `{"method":"…","params":[]}` | Raw miio method |
+| GET | `/api/v1/drive/last` | — | Last drive path JSON (ClankerDash coverage + lab export) |
+| PUT | `/api/v1/drive/last` | session JSON | Save last drive path (`/mnt/data/rockctl/drive/last.json`) |
+| GET | `/api/v1/drive/coverage` | — | RRSLAM path-layer cells (last clean coverage sample) |
+
+### Last drive path (Dash + LHLAM)
+
+```bash
+# after on-robot teach publishes:
+curl -s http://$CLANKER_HOST:8080/api/v1/drive/last | jq .
+# map path layer (coverage dots on Dash):
+curl -s http://$CLANKER_HOST:8080/api/v1/drive/coverage | jq .n
+```
+
+ClankerDash Map tab: **Path** reloads overlays; **Drive JSON** downloads export.  
+Lime polyline = last session; magenta = map coverage; red = issues.
 
 Schedule job fields: `id`, `enabled`, `hh`, `mm`, `dow` (e.g. `1-5`), `type` (`auto`|`spot`), `cycles` (1–3), `fan`, `water`.
 | GET | `/openapi.yaml` | — | OpenAPI 3 document |

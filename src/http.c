@@ -1,3 +1,4 @@
+#include "drive_path.h"
 #include "http.h"
 #include "clanker_dash_html.h"
 #include <stdio.h>
@@ -698,9 +699,13 @@ static int apply_clean_settings(miio_client *m, const char *fan, const char *wat
   return miio_call(m, "app_start", "[]", &r) == 0 ? (free(r), 0) : -1;
 }
 
+/* Forward: defined with async act helpers below */
+static int spawn_async_act(miio_client *m, const char *kind, const char *arg);
+
 /* Lightweight schedule: /mnt/data/rockctl/schedule.json
  * {"jobs":[{"id":"morning","enabled":true,"hh":9,"mm":0,"dow":"1-5","type":"auto","cycles":1,"fan":"balanced","water":"medium"}]}
  * dow: 0=Sun .. 6=Sat or ranges like 1-5; empty = every day
+ * Accept thread only stamps + queues start — never blocks on miio.
  */
 static void schedule_tick(miio_client *m) {
   static time_t last_min = 0;
@@ -796,8 +801,162 @@ static void schedule_tick(miio_client *m) {
     if (!strcmp(last, mark)) { p += 4; continue; }
     write_small("/mnt/data/rockctl/schedule.last", mark);
     if (!type[0]) snprintf(type, sizeof type, "auto");
-    apply_clean_settings(m, fan[0] ? fan : "balanced", water[0] ? water : "off", cycles, type);
+    /* Fire clean via async control start — never multi-miio on accept thread. */
+    spawn_async_act(m, "control", "start");
     p += 4;
+  }
+}
+
+
+/* Detached async manual: client already got 202; we run miio off-request. */
+typedef struct {
+  char *body_copy;
+  char host[64];
+  int miio_port;
+  char token_path[160];
+} async_man_job;
+
+static void *rock_async_manual_worker(void *arg) {
+  async_man_job *job = (async_man_job *)arg;
+  miio_client mc;
+  char *r = NULL;
+  if (!job) return NULL;
+  memset(&mc, 0, sizeof mc);
+  mc.sock = -1;
+  if (miio_prepare(&mc, job->host, job->miio_port, job->token_path) == 0)
+    do_manual(&mc, job->body_copy ? job->body_copy : "", &r);
+  free(r);
+  miio_close(&mc);
+  free(job->body_copy);
+  free(job);
+  return NULL;
+}
+
+/* Generic async control/fan/water — 202 then miio off-thread. */
+typedef struct {
+  char kind[16]; /* control | fan | water */
+  char arg[48];
+  char host[64];
+  int miio_port;
+  char token_path[160];
+} async_act_job;
+
+static void *rock_async_act_worker(void *arg) {
+  async_act_job *job = (async_act_job *)arg;
+  miio_client mc;
+  char *r = NULL;
+  if (!job) return NULL;
+  memset(&mc, 0, sizeof mc);
+  mc.sock = -1;
+  if (miio_prepare(&mc, job->host, job->miio_port, job->token_path) == 0) {
+    if (!strcmp(job->kind, "control"))
+      do_action(&mc, job->arg, &r);
+    else if (!strcmp(job->kind, "fan")) {
+      int mode = fan_mode(job->arg);
+      if (mode >= 0) {
+        char params[32];
+        snprintf(params, sizeof params, "[%d]", mode);
+        miio_call(&mc, "set_custom_mode", params, &r);
+      }
+    } else if (!strcmp(job->kind, "water")) {
+      int mode = water_mode(job->arg);
+      if (mode >= 0) {
+        char params[32];
+        snprintf(params, sizeof params, "[%d]", mode);
+        miio_call(&mc, "set_water_box_custom_mode", params, &r);
+      }
+    }
+  }
+  free(r);
+  miio_close(&mc);
+  free(job);
+  return NULL;
+}
+
+static int spawn_async_act(miio_client *m, const char *kind, const char *arg) {
+  async_act_job *job;
+  pthread_t th;
+  job = (async_act_job *)calloc(1, sizeof *job);
+  if (!job) return -1;
+  snprintf(job->kind, sizeof job->kind, "%s", kind ? kind : "control");
+  snprintf(job->arg, sizeof job->arg, "%s", arg ? arg : "");
+  snprintf(job->host, sizeof job->host, "%s",
+           (m && m->host[0]) ? m->host : "127.0.0.1");
+  job->miio_port = (m && m->port > 0) ? m->port : 54321;
+  snprintf(job->token_path, sizeof job->token_path, "%s",
+           (m && m->token_path[0]) ? m->token_path : "/mnt/data/miio/device.token");
+  if (pthread_create(&th, NULL, rock_async_act_worker, job) == 0) {
+    pthread_detach(th);
+    return 0;
+  }
+  rock_async_act_worker(job);
+  return 0;
+}
+
+/* Status cache + single-flight background refresh (stale-while-revalidate). */
+enum { ST_TTL_S = 2, ST_STALE_S = 30 };
+static pthread_mutex_t g_st_mu = PTHREAD_MUTEX_INITIALIZER;
+static char g_st_buf[6144];
+static time_t g_st_ts;
+static int g_st_have;
+static int g_st_refreshing;
+static char g_st_host[64];
+static int g_st_port;
+static char g_st_token[160];
+
+static void status_cache_store(const char *json) {
+  size_t n;
+  if (!json || !json[0]) return;
+  n = strlen(json);
+  if (n >= sizeof g_st_buf) n = sizeof g_st_buf - 1;
+  pthread_mutex_lock(&g_st_mu);
+  memcpy(g_st_buf, json, n);
+  g_st_buf[n] = 0;
+  g_st_ts = time(NULL);
+  g_st_have = 1;
+  pthread_mutex_unlock(&g_st_mu);
+}
+
+static void *status_bg_refresh(void *arg) {
+  miio_client mc;
+  char *r = NULL;
+  (void)arg;
+  memset(&mc, 0, sizeof mc);
+  mc.sock = -1;
+  if (miio_prepare(&mc, g_st_host[0] ? g_st_host : "127.0.0.1",
+                   g_st_port > 0 ? g_st_port : 54321,
+                   g_st_token[0] ? g_st_token : "/mnt/data/miio/device.token") == 0) {
+    mc.timeout_ms = 1200;
+    if (miio_call(&mc, "get_status", "[]", &r) == 0 && r)
+      status_cache_store(r);
+    free(r);
+  }
+  miio_close(&mc);
+  pthread_mutex_lock(&g_st_mu);
+  g_st_refreshing = 0;
+  pthread_mutex_unlock(&g_st_mu);
+  return NULL;
+}
+
+static void status_kick_refresh(miio_client *m) {
+  pthread_t th;
+  pthread_mutex_lock(&g_st_mu);
+  if (g_st_refreshing) {
+    pthread_mutex_unlock(&g_st_mu);
+    return;
+  }
+  g_st_refreshing = 1;
+  if (m) {
+    snprintf(g_st_host, sizeof g_st_host, "%s", m->host[0] ? m->host : "127.0.0.1");
+    g_st_port = m->port > 0 ? m->port : 54321;
+    snprintf(g_st_token, sizeof g_st_token, "%s",
+             m->token_path[0] ? m->token_path : "/mnt/data/miio/device.token");
+  }
+  pthread_mutex_unlock(&g_st_mu);
+  if (pthread_create(&th, NULL, status_bg_refresh, NULL) == 0)
+    pthread_detach(th);
+  else {
+    status_bg_refresh(NULL);
   }
 }
 
@@ -826,11 +985,50 @@ static void handle(int cfd, miio_client *m) {
   }
 
   if (is_get && !strcmp(path,"/api/v1/health")) {
-    resp(cfd,200,"application/json","{\"ok\":true,\"service\":\"rockctl\",\"version\":\"0.1.0\"}");
+    resp(cfd,200,"application/json",
+         "{\"ok\":true,\"service\":\"rockctl\",\"version\":\"0.1.2-nb\"}");
   } else if (is_get && !strcmp(path,"/api/v1/status")) {
-    char *r=NULL;
-    if (miio_call(m,"get_status","[]",&r)!=0) resp(cfd,502,"application/json","{\"error\":\"miio call failed\"}");
-    else { resp(cfd,200,"application/json",r); free(r); }
+    /* Non-blocking SWR: always answer from cache when possible; refresh in bg. */
+    time_t now = time(NULL);
+    int age = -1;
+    char local[6144];
+    int have = 0;
+
+    pthread_mutex_lock(&g_st_mu);
+    if (g_st_have && g_st_buf[0]) {
+      size_t n = strlen(g_st_buf);
+      if (n >= sizeof local) n = sizeof local - 1;
+      memcpy(local, g_st_buf, n);
+      local[n] = 0;
+      have = 1;
+      age = (int)(now - g_st_ts);
+    }
+    pthread_mutex_unlock(&g_st_mu);
+
+    if (have && age >= 0 && age <= ST_TTL_S) {
+      resp(cfd, 200, "application/json", local);
+    } else if (have && age >= 0 && age <= ST_STALE_S) {
+      /* stale but usable — kick refresh, never block Dash */
+      if (age > ST_TTL_S) status_kick_refresh(m);
+      resp(cfd, 200, "application/json", local);
+    } else {
+      /* cold cache: one sync fill so first paint works, then stay warm */
+      char *r = NULL;
+      if (m) m->timeout_ms = 1200;
+      if (miio_call(m, "get_status", "[]", &r) == 0 && r) {
+        status_cache_store(r);
+        resp(cfd, 200, "application/json", r);
+        free(r);
+      } else {
+        free(r);
+        status_kick_refresh(m);
+        if (have)
+          resp(cfd, 200, "application/json", local);
+        else
+          resp(cfd, 503, "application/json",
+               "{\"error\":\"status warming\",\"hint\":\"retry in 1s\"}");
+      }
+    }
   } else if (is_get && !strcmp(path,"/api/v1/consumable")) {
     char *r=NULL;
     if (miio_call(m,"get_consumable","[]",&r)!=0) resp(cfd,502,"application/json","{\"error\":\"miio call failed\"}");
@@ -838,34 +1036,78 @@ static void handle(int cfd, miio_client *m) {
   } else if ((is_post||is_put) && !strcmp(path,"/api/v1/control")) {
     char *body = strstr(req,"\r\n\r\n"); body = body?body+4:"";
     char action[32];
+    int want_sync = body && (strstr(body, "\"sync\":true") || strstr(body, "\"sync\":1"));
     if (!json_str(body,"action",action,sizeof action)) {
       resp(cfd,400,"application/json","{\"error\":\"missing action\"}");
+    } else if (!want_sync) {
+      /* Default async — Dash stays snappy; miio runs off-thread */
+      if (spawn_async_act(m, "control", action) != 0)
+        resp(cfd,500,"application/json","{\"error\":\"spawn failed\"}");
+      else
+        resp(cfd,202,"application/json",
+             "{\"ok\":true,\"async\":true,\"action\":\"done\",\"queued\":true}");
+      /* invalidate status cache so next poll refreshes */
+      pthread_mutex_lock(&g_st_mu);
+      g_st_ts = 0;
+      pthread_mutex_unlock(&g_st_mu);
+      status_kick_refresh(m);
     } else {
       char *r=NULL; int rc=do_action(m,action,&r);
       if (rc==-2) resp(cfd,400,"application/json","{\"error\":\"unknown action\"}");
       else if (rc!=0) resp(cfd,502,"application/json","{\"error\":\"miio call failed\"}");
       else { resp(cfd,200,"application/json",r?r:"{\"result\":[\"ok\"]}"); free(r); }
+      pthread_mutex_lock(&g_st_mu);
+      g_st_ts = 0;
+      pthread_mutex_unlock(&g_st_mu);
     }
   } else if ((is_post||is_put) &&
-             (!strcmp(path,"/api/v1/manual") || !strcmp(path,"/api/v1/rc"))) {
-    /* Remote control / manual drive — no cleaning (app_rc_start/move/end). */
+             (!strcmp(path,"/api/v1/manual") || !strcmp(path,"/api/v1/rc") ||
+              !strcmp(path,"/api/v1/manual/async") || !strcmp(path,"/api/v1/rc/async"))) {
+    /* Manual drive. async=true or /manual/async → 202 + detached miio (non-blocking client). */
     char *body = strstr(req,"\r\n\r\n"); body = body?body+4:"";
-    char *r=NULL; int rc=do_manual(m, body?body:"", &r);
-    if (rc==-2)
-      resp(cfd,400,"application/json",
-           "{\"error\":\"action start|stop|move|forward|back|left|right|halt\","
-           "\"note\":\"manual drive without cleaning; engage first\"}");
-    else if (rc!=0)
-      resp(cfd,502,"application/json","{\"error\":\"miio manual failed\"}");
-    else {
-      char wrap[768];
-      const char *mi = r ? r : "{\"result\":[\"ok\"]}";
-      int n = snprintf(wrap, sizeof wrap,
-                       "{\"ok\":true,\"mode\":\"manual\",\"miio\":%s}",
-                       (mi[0]=='{'||mi[0]=='[') ? mi : "null");
-      if (n > 0 && n < (int)sizeof wrap) resp(cfd,200,"application/json",wrap);
-      else resp(cfd,200,"application/json","{\"ok\":true,\"mode\":\"manual\"}");
-      free(r);
+    int want_async = !strcmp(path,"/api/v1/manual/async") || !strcmp(path,"/api/v1/rc/async") ||
+                     (body && (strstr(body, "\"async\":true") || strstr(body, "\"async\":1") ||
+                               strstr(body, "\"async\": true")));
+    if (want_async) {
+      async_man_job *job = (async_man_job *)calloc(1, sizeof *job);
+      size_t blen = body ? strlen(body) : 0;
+      pthread_t th;
+      if (!job || !(job->body_copy = (char *)malloc(blen + 1))) {
+        free(job);
+        resp(cfd,500,"application/json","{\"error\":\"oom\"}");
+      } else {
+        memcpy(job->body_copy, body ? body : "", blen + 1);
+        snprintf(job->host, sizeof job->host, "%s",
+                 (m && m->host[0]) ? m->host : "127.0.0.1");
+        job->miio_port = (m && m->port > 0) ? m->port : 54321;
+        snprintf(job->token_path, sizeof job->token_path, "%s",
+                 (m && m->token_path[0]) ? m->token_path : "/mnt/data/miio/device.token");
+        resp(cfd,202,"application/json",
+             "{\"ok\":true,\"async\":true,\"mode\":\"manual\"}");
+        if (pthread_create(&th, NULL, rock_async_manual_worker, job) == 0)
+          pthread_detach(th);
+        else {
+          rock_async_manual_worker(job);
+        }
+      }
+    } else {
+      char *r=NULL; int rc=do_manual(m, body?body:"", &r);
+      if (rc==-2)
+        resp(cfd,400,"application/json",
+             "{\"error\":\"action start|stop|move|forward|back|left|right|halt\","
+             "\"note\":\"use async:true or /api/v1/manual/async for non-blocking\"}");
+      else if (rc!=0)
+        resp(cfd,502,"application/json","{\"error\":\"miio manual failed\"}");
+      else {
+        char wrap[768];
+        const char *mi = r ? r : "{\"result\":[\"ok\"]}";
+        int n = snprintf(wrap, sizeof wrap,
+                         "{\"ok\":true,\"mode\":\"manual\",\"miio\":%s}",
+                         (mi[0]=='{'||mi[0]=='[') ? mi : "null");
+        if (n > 0 && n < (int)sizeof wrap) resp(cfd,200,"application/json",wrap);
+        else resp(cfd,200,"application/json","{\"ok\":true,\"mode\":\"manual\"}");
+        free(r);
+      }
     }
   } else if (is_post && (!strcmp(path,"/api/v1/demo/work-room") || !strcmp(path,"/api/v1/demo/work_room"))) {
     char *tmp=NULL;
@@ -950,21 +1192,23 @@ static void handle(int cfd, miio_client *m) {
       }
     }
   } else if (is_put && !strcmp(path,"/api/v1/fan")) {
-
     char *body = strstr(req,"\r\n\r\n"); body = body?body+4:"";
     char level[32];
+    int want_sync = body && (strstr(body, "\"sync\":true") || strstr(body, "\"sync\":1"));
     if (!json_str(body,"level",level,sizeof level)) {
       resp(cfd,400,"application/json","{\"error\":\"missing level\"}");
+    } else if (fan_mode(level) < 0) {
+      resp(cfd,400,"application/json","{\"error\":\"bad level\"}");
+    } else if (!want_sync) {
+      spawn_async_act(m, "fan", level);
+      resp(cfd,202,"application/json","{\"ok\":true,\"async\":true,\"fan\":true}");
     } else {
       int mode = fan_mode(level);
-      if (mode < 0) resp(cfd,400,"application/json","{\"error\":\"bad level\"}");
-      else {
-        char params[32]; snprintf(params,sizeof params,"[%d]", mode);
-        char *r=NULL;
-        if (miio_call(m,"set_custom_mode",params,&r)!=0)
-          resp(cfd,502,"application/json","{\"error\":\"miio call failed\"}");
-        else { resp(cfd,200,"application/json",r?r:"{}"); free(r); }
-      }
+      char params[32]; snprintf(params,sizeof params,"[%d]", mode);
+      char *r=NULL;
+      if (miio_call(m,"set_custom_mode",params,&r)!=0)
+        resp(cfd,502,"application/json","{\"error\":\"miio call failed\"}");
+      else { resp(cfd,200,"application/json",r?r:"{}"); free(r); }
     }
   } else if (is_post && !strcmp(path,"/api/v1/raw")) {
     char *body = strstr(req,"\r\n\r\n"); body = body?body+4:"";
@@ -998,7 +1242,37 @@ static void handle(int cfd, miio_client *m) {
         resp(cfd,502,"application/json","{\"error\":\"miio call failed\"}");
       else { resp(cfd,200,"application/json",r?r:"{}"); free(r); }
     }
+  } else if (is_get && (!strcmp(path,"/api/v1/drive/last") || !strcmp(path,"/api/v1/drive/path"))) {
+    /* Last drive path for ClankerDash coverage + lab export */
+    char *body = (char*)malloc(512*1024);
+    int n;
+    if (!body) { resp(cfd,500,"application/json","{\"error\":\"oom\"}"); }
+    else {
+      n = drive_path_read_last(body, 512*1024);
+      if (n < 0) resp(cfd,404,"application/json","{\"error\":\"no path\"}");
+      else resp(cfd,200,"application/json",body);
+      free(body);
+    }
+  } else if ((is_post || is_put) && (!strcmp(path,"/api/v1/drive/last") || !strcmp(path,"/api/v1/drive/path"))) {
+    /* Teach/lab posts full session JSON */
+    char *dbody = strstr(req,"\r\n\r\n"); dbody = dbody ? dbody+4 : "";
+    if (!dbody || !dbody[0]) resp(cfd,400,"application/json","{\"error\":\"empty body\"}");
+    else if (drive_path_write_last(dbody, strlen(dbody)) != 0)
+      resp(cfd,500,"application/json","{\"error\":\"write failed\"}");
+    else resp(cfd,200,"application/json","{\"ok\":true,\"saved\":\"/mnt/data/rockctl/drive/last.json\"}");
+  } else if (is_get && (!strcmp(path,"/api/v1/drive/coverage") || !strcmp(path,"/api/v1/drive/map_path"))) {
+    /* RRSLAM path layer → points (last clean coverage) */
+    char *cbody = (char*)malloc(768*1024);
+    int n;
+    if (!cbody) { resp(cfd,500,"application/json","{\"error\":\"oom\"}"); }
+    else {
+      n = drive_path_extract_rrslam(cbody, 768*1024, 1200);
+      if (n < 0) resp(cfd,500,"application/json","{\"error\":\"extract failed\"}");
+      else resp(cfd,200,"application/json",cbody);
+      free(cbody);
+    }
   } else if (is_get && !strcmp(path,"/api/v1/maps")) {
+
     const char *names[] = {"last_map","user_map0",NULL};
     char body[3072];
     size_t o = 0;
@@ -2008,9 +2282,186 @@ static void handle(int cfd, miio_client *m) {
     } else if (!strcmp(service, "rockctl")) {
       /* cannot stop self cleanly from handler; report only */
       resp(cfd, 200, "application/json",
-           "{\"ok\":true,\"service\":\"rockctl\",\"note\":\"always online while this API responds; stop via USB shell killall rockctl\"}");
+           "{\"ok\":true,\"service\":\"rockctl\",\"note\":\"always online while this API responds; use POST /api/v1/system action=restart_stack\"}");
+    } else if (!strcmp(service, "stack") || !strcmp(service, "all")) {
+      /* alias → full stack restart (same as /api/v1/system) */
+      if (!strcmp(action, "restart") || !strcmp(action, "on") || !strcmp(action, "reload")) {
+        run_sh("nohup /bin/sh -c '"
+               "sleep 1; "
+               "killall -9 lhlam 2>/dev/null; true; "
+               "kill $(cat /mnt/data/lhlam/session.pid 2>/dev/null) 2>/dev/null; true; "
+               "kill $(cat /mnt/data/nanobot/nanobot.pid 2>/dev/null) 2>/dev/null; "
+               "killall nanobot 2>/dev/null; true; "
+               "sleep 1; "
+               "export NANOBOT_HOME=/mnt/data/nanobot; "
+               "if [ -x /mnt/data/nanobot/run.sh ]; then "
+               "  /mnt/data/nanobot/run.sh >>/mnt/data/nanobot/nanobot.out 2>&1 & "
+               "  echo $! >/mnt/data/nanobot/nanobot.pid; "
+               "fi; "
+               "if [ -f /mnt/data/lhlam/session.flag ] && [ -x /mnt/data/lhlam/scripts/session_loop.sh ]; then "
+               "  cd /mnt/data/lhlam && nohup ./scripts/session_loop.sh >>lab/logs/session_loop.log 2>&1 & "
+               "  echo $! >/mnt/data/lhlam/session.pid; "
+               "fi; "
+               "killall rockctl 2>/dev/null; true; "
+               "' >/mnt/data/rockctl/system_restart.log 2>&1 &");
+        resp(cfd, 200, "application/json",
+             "{\"ok\":true,\"service\":\"stack\",\"action\":\"restart\","
+             "\"note\":\"assist+train restarting; rockctl will respawn via watchdog in ~few seconds\"}");
+      } else {
+        resp(cfd, 400, "application/json", "{\"error\":\"stack action restart\"}");
+      }
     } else {
       resp(cfd, 400, "application/json", "{\"error\":\"unknown service\"}");
+    }
+
+  } else if ((is_post || is_put) && !strcmp(path, "/api/v1/system")) {
+    /* Settings → Restart stack / Reboot robot. Deferred so HTTP can answer first. */
+    char *body = strstr(req, "\r\n\r\n");
+    body = body ? body + 4 : "";
+    char action[32] = {0};
+    json_str(body, "action", action, sizeof action);
+    if (!action[0]) json_str(body, "cmd", action, sizeof action);
+    if (!action[0]) {
+      resp(cfd, 400, "application/json",
+           "{\"error\":\"need action: restart_stack|restart_assist|restart_train|reboot\"}");
+    } else if (!strcmp(action, "restart_stack") || !strcmp(action, "restart") ||
+               !strcmp(action, "reload")) {
+      /* Halt RC, bounce assist + train, then rockctl (watchdog brings it back). */
+      run_sh("nohup /bin/sh -c '"
+             "echo \"$(date) restart_stack\" >>/mnt/data/rockctl/system_restart.log; "
+             "wget -q -T 2 -O- --post-data=\"{\\\"action\\\":\\\"halt\\\",\\\"async\\\":true}\" "
+             "  --header=\"Content-Type: application/json\" "
+             "  http://127.0.0.1:8080/api/v1/manual/async 2>/dev/null; true; "
+             "sleep 1; "
+             "killall -9 lhlam 2>/dev/null; true; "
+             "kill $(cat /mnt/data/lhlam/session.pid 2>/dev/null) 2>/dev/null; true; "
+             "kill $(cat /mnt/data/nanobot/nanobot.pid 2>/dev/null) 2>/dev/null; "
+             "killall nanobot 2>/dev/null; true; "
+             "sleep 1; "
+             "export NANOBOT_HOME=/mnt/data/nanobot; "
+             "if [ -x /mnt/data/nanobot/run.sh ]; then "
+             "  /mnt/data/nanobot/run.sh >>/mnt/data/nanobot/nanobot.out 2>&1 & "
+             "  echo $! >/mnt/data/nanobot/nanobot.pid; "
+             "elif [ -x /mnt/data/nanobot/bin/nanobot ]; then "
+             "  /mnt/data/nanobot/bin/nanobot --home /mnt/data/nanobot --port 8787 "
+             "    >>/mnt/data/nanobot/nanobot.out 2>&1 & echo $! >/mnt/data/nanobot/nanobot.pid; "
+             "fi; "
+             "if [ -f /mnt/data/lhlam/session.flag ] && [ -x /mnt/data/lhlam/scripts/session_loop.sh ]; then "
+             "  cd /mnt/data/lhlam && nohup ./scripts/session_loop.sh >>lab/logs/session_loop.log 2>&1 & "
+             "  echo $! >/mnt/data/lhlam/session.pid; "
+             "fi; "
+             "sleep 1; "
+             "killall rockctl 2>/dev/null; true; "
+             "' >/mnt/data/rockctl/system_restart.log 2>&1 &");
+      resp(cfd, 200, "application/json",
+           "{\"ok\":true,\"action\":\"restart_stack\","
+           "\"note\":\"halting RC, restarting assist+train; rockctl restarts via watchdog (~5–15s). Refresh dash after.\"}");
+    } else if (!strcmp(action, "restart_assist") || !strcmp(action, "restart_nanobot")) {
+      run_sh("nohup /bin/sh -c '"
+             "kill $(cat /mnt/data/nanobot/nanobot.pid 2>/dev/null) 2>/dev/null; "
+             "killall nanobot 2>/dev/null; true; sleep 1; "
+             "export NANOBOT_HOME=/mnt/data/nanobot; "
+             "if [ -x /mnt/data/nanobot/run.sh ]; then "
+             "  /mnt/data/nanobot/run.sh >>/mnt/data/nanobot/nanobot.out 2>&1 & "
+             "  echo $! >/mnt/data/nanobot/nanobot.pid; "
+             "fi"
+             "' >/mnt/data/rockctl/system_restart.log 2>&1 &");
+      resp(cfd, 200, "application/json",
+           "{\"ok\":true,\"action\":\"restart_assist\",\"note\":\"assist peer restarting\"}");
+    } else if (!strcmp(action, "restart_train") || !strcmp(action, "restart_session")) {
+      run_sh("nohup /bin/sh -c '"
+             "killall -9 lhlam 2>/dev/null; true; "
+             "kill $(cat /mnt/data/lhlam/session.pid 2>/dev/null) 2>/dev/null; true; "
+             "sleep 1; "
+             "touch /mnt/data/lhlam/session.flag; "
+             "if [ -x /mnt/data/lhlam/scripts/session_loop.sh ]; then "
+             "  cd /mnt/data/lhlam && nohup ./scripts/session_loop.sh >>lab/logs/session_loop.log 2>&1 & "
+             "  echo $! >/mnt/data/lhlam/session.pid; "
+             "fi"
+             "' >/mnt/data/rockctl/system_restart.log 2>&1 &");
+      resp(cfd, 200, "application/json",
+           "{\"ok\":true,\"action\":\"restart_train\",\"note\":\"lhlam session_loop restarting\"}");
+    } else if (!strcmp(action, "reboot") || !strcmp(action, "reboot_robot")) {
+      run_sh("nohup /bin/sh -c '"
+             "echo \"$(date) reboot\" >>/mnt/data/rockctl/system_restart.log; "
+             "wget -q -T 2 -O- --post-data=\"{\\\"action\\\":\\\"halt\\\",\\\"async\\\":true}\" "
+             "  --header=\"Content-Type: application/json\" "
+             "  http://127.0.0.1:8080/api/v1/manual/async 2>/dev/null; true; "
+             "sync; sleep 2; reboot"
+             "' >/mnt/data/rockctl/system_restart.log 2>&1 &");
+      resp(cfd, 200, "application/json",
+           "{\"ok\":true,\"action\":\"reboot\","
+           "\"note\":\"robot rebooting in ~2s — RC halted, sync done. Dash will drop until boot.\"}");
+    } else {
+      resp(cfd, 400, "application/json",
+           "{\"error\":\"unknown action\",\"want\":\"restart_stack|restart_assist|restart_train|reboot\"}");
+    }
+
+  } else if (is_get && !strcmp(path, "/api/v1/system")) {
+    resp(cfd, 200, "application/json",
+         "{\"ok\":true,\"actions\":[\"restart_stack\",\"restart_assist\",\"restart_train\",\"reboot\"],"
+         "\"note\":\"POST /api/v1/system {\\\"action\\\":\\\"restart_stack\\\"}\"}");
+
+  } else if (is_get && (!strcmp(path, "/api/v1/train/status") || !strcmp(path, "/api/v1/train"))) {
+    /* Cheap file reads only — no miio. Used by Dash Train tab. */
+    char report[512] = {0}, sess[512] = {0};
+    int running = 0;
+    char mode[32] = "stopped";
+    {
+      FILE *f = fopen("/mnt/data/nanobot/braincube/last_report.txt", "r");
+      if (f) {
+        size_t n = fread(report, 1, sizeof report - 1, f);
+        report[n] = 0;
+        fclose(f);
+      }
+    }
+    {
+      FILE *f = fopen("/mnt/data/nanobot/braincube/session_status.json", "r");
+      if (f) {
+        size_t n = fread(sess, 1, sizeof sess - 1, f);
+        sess[n] = 0;
+        fclose(f);
+      }
+    }
+    if (access("/mnt/data/lhlam/session.flag", F_OK) == 0) running = 1;
+    if (strstr(sess, "\"running\":true") || strstr(sess, "\"running\": true"))
+      running = 1;
+    if (strstr(sess, "lhlam_observe") || strstr(sess, "observe") || strstr(sess, "clean"))
+      snprintf(mode, sizeof mode, "observe");
+    else if (strstr(sess, "lhlam_teach") || strstr(sess, "rc") || strstr(sess, "teach"))
+      snprintf(mode, sizeof mode, "rc_teach");
+    else if (running)
+      snprintf(mode, sizeof mode, "session");
+    /* sanitize report for JSON string */
+    {
+      char rep_esc[640];
+      size_t i, o = 0;
+      for (i = 0; report[i] && o + 2 < sizeof rep_esc; i++) {
+        char c = report[i];
+        if (c == '"' || c == '\\') {
+          rep_esc[o++] = '\\';
+          rep_esc[o++] = c;
+        } else if (c == '\n' || c == '\r') {
+          rep_esc[o++] = ' ';
+        } else if ((unsigned char)c < 32) {
+          continue;
+        } else {
+          rep_esc[o++] = c;
+        }
+      }
+      rep_esc[o] = 0;
+      /* session blob: only include if looks like JSON object */
+      char body[1600];
+      if (sess[0] == '{') {
+        snprintf(body, sizeof body,
+                 "{\"ok\":true,\"running\":%s,\"mode\":\"%s\",\"report\":\"%s\",\"session\":%s}",
+                 running ? "true" : "false", mode, rep_esc, sess);
+      } else {
+        snprintf(body, sizeof body,
+                 "{\"ok\":true,\"running\":%s,\"mode\":\"%s\",\"report\":\"%s\"}",
+                 running ? "true" : "false", mode, rep_esc);
+      }
+      resp(cfd, 200, "application/json", body);
     }
 
   } else if (is_get && !strcmp(path, "/api/v1/wifi")) {
@@ -2070,19 +2521,22 @@ static void handle(int cfd, miio_client *m) {
   } else if (is_put && !strcmp(path, "/api/v1/water")) {
     char *body = strstr(req, "\r\n\r\n"); body = body ? body + 4 : "";
     char level[24];
+    int want_sync = body && (strstr(body, "\"sync\":true") || strstr(body, "\"sync\":1"));
     if (!json_str(body, "level", level, sizeof level)) {
       resp(cfd, 400, "application/json", "{\"error\":\"missing level off|low|medium|high\"}");
+    } else if (water_mode(level) < 0) {
+      resp(cfd, 400, "application/json", "{\"error\":\"bad level\"}");
+    } else if (!want_sync) {
+      spawn_async_act(m, "water", level);
+      resp(cfd, 202, "application/json", "{\"ok\":true,\"async\":true,\"water\":true}");
     } else {
       int mode = water_mode(level);
-      if (mode < 0) resp(cfd, 400, "application/json", "{\"error\":\"bad level\"}");
-      else {
-        char params[32];
-        snprintf(params, sizeof params, "[%d]", mode);
-        char *r = NULL;
-        if (miio_call(m, "set_water_box_custom_mode", params, &r) != 0)
-          resp(cfd, 502, "application/json", "{\"error\":\"miio water failed\"}");
-        else { resp(cfd, 200, "application/json", r ? r : "{\"result\":[\"ok\"]}"); free(r); }
-      }
+      char params[32];
+      snprintf(params, sizeof params, "[%d]", mode);
+      char *r = NULL;
+      if (miio_call(m, "set_water_box_custom_mode", params, &r) != 0)
+        resp(cfd, 502, "application/json", "{\"error\":\"miio water failed\"}");
+      else { resp(cfd, 200, "application/json", r ? r : "{\"result\":[\"ok\"]}"); free(r); }
     }
 
   } else if (is_get && !strcmp(path, "/api/v1/schedule")) {
@@ -2710,18 +3164,17 @@ static void handle(int cfd, miio_client *m) {
   } else if (is_get && !strcmp(path,"/openapi.yaml")) {
     resp(cfd,200,"application/yaml", OPENAPI_YAML);
   } else if (is_get && (!strcmp(path,"/")||!strcmp(path,"/index.html")||!strcmp(path,"/dash"))) {
-    /* ClankerDash UI (separate product from nanobot) */
+    /* ClankerDash UI — no miio path (lazy workers never open UDP for this). */
     resp(cfd,200,"text/html; charset=utf-8", CLANKER_DASH_HTML);
   } else if (is_get && (!strcmp(path,"/api")||!strcmp(path,"/docs"))) {
     resp(cfd,200,"text/plain",
-      "rockctl API + ClankerDash UI\n"
+      "rockctl API + ClankerDash UI (non-blocking)\n"
       "  UI   GET /\n"
-      "  GET  /api/v1/health|status|consumable|maps\n"
-      "  POST /api/v1/manual {\"action\":\"start|stop|forward|back|left|right|halt|move\"}\n"
-      "  GET  /api/v1/maps/last_map|user_map0  (export)\n"
-      "  POST /api/v1/control {\"action\":\"start|stop|pause|home|spot|locate\"}\n"
-      "  PUT  /api/v1/fan {\"level\":\"quiet|balanced|turbo|max\"}\n"
-      "  POST /api/v1/raw\n");
+      "  GET  /api/v1/health|status|train/status|resources\n"
+      "  POST /api/v1/control {action}  (async 202 default; sync:true to wait)\n"
+      "  POST /api/v1/manual/async {action}  (always non-blocking)\n"
+      "  PUT  /api/v1/fan|water  (async 202 default)\n"
+      "  POST /api/v1/system {restart_stack|reboot}\n");
   } else {
     resp(cfd,404,"text/plain","not found\n");
   }
@@ -2776,11 +3229,14 @@ static void *rock_worker(void *arg) {
     miio_client mc;
     memset(&mc, 0, sizeof mc);
     mc.sock = -1;
-    /* Own UDP socket per job — concurrent miio without parent races */
-    if (miio_prepare(&mc, job.host, job.miio_port, job.token_path) != 0) {
-      /* still serve non-miio routes (health, dash, speak) */
-      mc.token_ok = 0;
-    }
+    /* Lazy miio: only prepare credentials; open UDP on first miio_call.
+     * Static routes (/, health, train) never open a socket. */
+    snprintf(mc.host, sizeof mc.host, "%s", job.host[0] ? job.host : "127.0.0.1");
+    mc.port = job.miio_port > 0 ? job.miio_port : 54321;
+    snprintf(mc.token_path, sizeof mc.token_path, "%s",
+             job.token_path[0] ? job.token_path : "/mnt/data/miio/device.token");
+    mc.token_ok = 0;
+    mc.timeout_ms = 1500;
     handle(job.cfd, &mc);
     miio_close(&mc);
   }

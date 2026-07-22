@@ -77,7 +77,7 @@ int miio_prepare(miio_client *c, const char *host, int port, const char *token_p
   if (!c) return -1;
   memset(c, 0, sizeof *c);
   c->sock = -1;
-  c->timeout_ms = 3000; /* lean: fail faster so HTTP accept is not starved */
+  c->timeout_ms = 1500; /* lean: fail fast — Dash must not wait multi-second miio */
   snprintf(c->host, sizeof c->host, "%s", host ? host : "127.0.0.1");
   c->port = port > 0 ? port : 54321;
   if (token_path && token_path[0])

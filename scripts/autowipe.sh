@@ -95,3 +95,28 @@ rm -rf "$DATA/unsquashfs" 2>/dev/null
 AFTER=$(free_kb)
 log "autowipe done free_kb before=$BEFORE after=$AFTER"
 echo "autowipe: free_kb $BEFORE -> $AFTER"
+
+# --- lhlam learn-lab byproducts (keep latest only) ---
+if [ -d "$DATA/lhlam/lab/logs" ]; then
+  for f in "$DATA/lhlam/lab/logs"/*; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    case "$base" in
+      on_robot_teach_latest.log|self_learning_drive_nohup.log) ;;
+      loop.jsonl)
+        sz=$(wc -c < "$f" 2>/dev/null || echo 0)
+        if [ "$sz" -gt 8192 ] 2>/dev/null; then
+          tail -c 4096 "$f" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f" || : > "$f"
+          log "trim lhlam loop.jsonl was=$sz"
+        fi
+        ;;
+      *) rm -f "$f" 2>/dev/null; log "rm lhlam log $base" ;;
+    esac
+  done
+fi
+if [ -d "$DATA/lhlam/lab/paths" ]; then
+  rm -f "$DATA/lhlam/lab/paths"/drive_*.json 2>/dev/null
+fi
+if [ -d "$DATA/rockctl/drive" ]; then
+  rm -f "$DATA/rockctl/drive"/drive_*.json 2>/dev/null
+fi

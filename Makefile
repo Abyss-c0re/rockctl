@@ -12,7 +12,7 @@ endif
 ARM_CC := $(NANOBOT_TC)/armv7l-linux-musleabihf-gcc
 ARM_STRIP := $(NANOBOT_TC)/armv7l-linux-musleabihf-strip
 
-SRC := src/miio.c src/http.c src/places.c src/main.c third_party/aes.c third_party/md5.c
+SRC := src/miio.c src/http.c src/places.c src/drive_path.c src/main.c third_party/aes.c third_party/md5.c
 # Dash is embedded in clanker_dash_html.h (generated from www/index.html or clanker-dash)
 HDR := src/*.h src/clanker_dash_html.h
 CFLAGS := -O2 -Wall -Wextra -Wno-unused-parameter -Ithird_party -DCBC=1 -DECB=0 -DCTR=0 -pthread
