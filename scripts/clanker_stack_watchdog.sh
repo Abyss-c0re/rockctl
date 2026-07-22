@@ -76,24 +76,37 @@ ensure_ouch() {
 }
 
 
+# Count full nanobot servers (not short-lived fork children if any).
+nanobot_server_count() {
+  ps 2>/dev/null | grep -v grep | grep -c '[n]anobot --home' || echo 0
+}
+
 ensure_nanobot() {
+  # Healthy = peer answers AND exactly one listener process.
+  # Multiple servers → "Address in use" + Grok fetch flakiness.
+  cnt=$(nanobot_server_count)
   if http_ok "http://127.0.0.1:${NANO_PORT}/peer/v1/health"; then
-    return 0
+    if [ "$cnt" -le 1 ] 2>/dev/null; then
+      return 0
+    fi
+    log "nanobot healthy but multiproc cnt=$cnt — consolidate"
+  else
+    log "nanobot health fail — restart (cnt=$cnt)"
   fi
-  log "nanobot health fail — restart"
   kill $(cat "$NANO_HOME/nanobot.pid" 2>/dev/null) 2>/dev/null || true
   killall nanobot 2>/dev/null || true
   sleep 1
+  killall -9 nanobot 2>/dev/null || true
+  sleep 1
   export NANOBOT_HOME="$NANO_HOME"
-  if [ -x "$NANO_HOME/run.sh" ]; then
-    nohup "$NANO_HOME/run.sh" >> "$NANO_HOME/nanobot.out" 2>&1 &
-    echo $! > "$NANO_HOME/nanobot.pid"
-  elif [ -x "$NANO_HOME/bin/nanobot" ]; then
-    WWW=""
-    if [ -f "$NANO_HOME/settings" ]; then
-      # shellcheck disable=SC1090
-      . "$NANO_HOME/settings" 2>/dev/null || true
-    fi
+  # Prefer direct binary (run.sh double-starts under some boots)
+  WWW=""
+  UI=off
+  if [ -f "$NANO_HOME/settings" ]; then
+    # shellcheck disable=SC1090
+    . "$NANO_HOME/settings" 2>/dev/null || true
+  fi
+  if [ -x "$NANO_HOME/bin/nanobot" ]; then
     if [ "${UI:-off}" = "on" ] && [ -n "${WWW:-}" ] && [ -d "$WWW" ]; then
       nohup "$NANO_HOME/bin/nanobot" --home "$NANO_HOME" --port "$NANO_PORT" --www "$WWW" \
         >> "$NANO_HOME/nanobot.out" 2>&1 &
@@ -102,13 +115,16 @@ ensure_nanobot() {
         >> "$NANO_HOME/nanobot.out" 2>&1 &
     fi
     echo $! > "$NANO_HOME/nanobot.pid"
+  elif [ -x "$NANO_HOME/run.sh" ]; then
+    nohup "$NANO_HOME/run.sh" >> "$NANO_HOME/nanobot.out" 2>&1 &
+    echo $! > "$NANO_HOME/nanobot.pid"
   else
     log "nanobot binary missing"
     return 1
   fi
   sleep 2
   if http_ok "http://127.0.0.1:${NANO_PORT}/peer/v1/health"; then
-    log "nanobot recovered"
+    log "nanobot recovered pid=$(cat "$NANO_HOME/nanobot.pid" 2>/dev/null) cnt=$(nanobot_server_count)"
   else
     log "nanobot still down after restart"
   fi
