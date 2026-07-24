@@ -24,13 +24,24 @@ LOG=/mnt/data/clean_music.log
 PIDFILE=/mnt/data/clean_music.pid
 APLAY_PIDFILE=/mnt/data/clean_music_aplay.pid
 STATUS_URL="${ROCKCTL_STATUS_URL:-http://127.0.0.1:8080/api/v1/status}"
-POLL_PLAY=1
-POLL_IDLE=1
+# Adaptive poll (251MB board): wake rarely when off; status less often when docked.
+POLL_PLAY="${POLL_PLAY:-2}"       # while actively playing music
+POLL_IDLE="${POLL_IDLE:-5}"       # clean mode, not cleaning (status poll)
+POLL_OFF="${POLL_OFF:-20}"        # music_mode=off — almost free
+POLL_SPEAK="${POLL_SPEAK:-1}"     # while SAM TTS busy
 BUSY_BACKOFF=2
 EMPTY_TOLERANCE=8
 ONCE_DONE_FLAG=/tmp/clanker_music_once_done
+# Keep clean_music.log small
+LOG_MAX_BYTES="${CLEAN_MUSIC_LOG_MAX:-16384}"
 
-log() { echo "$(date 2>/dev/null || echo '?') $*" >> "$LOG"; }
+log() {
+  echo "$(date 2>/dev/null || echo '?') $*" >> "$LOG"
+  sz=$(wc -c < "$LOG" 2>/dev/null || echo 0)
+  if [ "$sz" -gt "$LOG_MAX_BYTES" ] 2>/dev/null; then
+    tail -c $((LOG_MAX_BYTES / 2)) "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+  fi
+}
 
 read_mode() {
   m=$(cat "$MODE_FILE" 2>/dev/null | tr -d ' \t\r\n' | tr 'A-Z' 'a-z')
@@ -306,11 +317,14 @@ want_music=0
 was_playing=0
 prev_want=0
 
+# Autowipe ~ hourly by wall clock (not poll ticks — poll is adaptive)
+AW_EVERY_SEC=3600
+AW_LAST=$(date +%s 2>/dev/null || echo 0)
+
 while true; do
-  AW_TICKS=$((AW_TICKS + 1))
-  # ~ every 3600 poll seconds (~1h at 1s poll)
-  if [ "$AW_TICKS" -ge 3600 ] 2>/dev/null; then
-    AW_TICKS=0
+  now=$(date +%s 2>/dev/null || echo 0)
+  if [ "$now" -gt 0 ] && [ "$AW_LAST" -gt 0 ] && [ $((now - AW_LAST)) -ge "$AW_EVERY_SEC" ] 2>/dev/null; then
+    AW_LAST=$now
     [ -x /mnt/data/rockctl/bin/autowipe.sh ] && /mnt/data/rockctl/bin/autowipe.sh >/dev/null 2>&1 || true
   fi
   mode=$(read_mode)
@@ -323,7 +337,7 @@ while true; do
 
   # Yield entirely while SAM / voice is speaking
   if speak_busy; then
-    sleep "$POLL_IDLE"
+    sleep "$POLL_SPEAK"
     continue
   fi
 
@@ -331,7 +345,7 @@ while true; do
     stop_aplay
     want_music=0
     was_playing=0
-    sleep "$POLL_IDLE"
+    sleep "$POLL_OFF"
     continue
   fi
 

@@ -91,7 +91,27 @@ echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"; log "watchdog exit"; exit 0' INT TERM
 
 mkdir -p "$ROOT"
+# Ensure stack watchdog (nanobot+ouch) lives; cheap once-per-boot style check
+ensure_stack_watchdog() {
+  SW="$ROOT/bin/clanker_stack_watchdog.sh"
+  [ -x "$SW" ] || return 0
+  if [ -f "$ROOT/stack_watchdog.pid" ]; then
+    sp=$(cat "$ROOT/stack_watchdog.pid" 2>/dev/null)
+    if [ -n "$sp" ] && kill -0 "$sp" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  # process grep fallback
+  if ps 2>/dev/null | grep -v grep | grep -q '[c]lanker_stack_watchdog'; then
+    return 0
+  fi
+  nohup "$SW" >>"$ROOT/stack_watchdog.log" 2>&1 &
+  echo $! > "$ROOT/stack_watchdog.pid"
+  log "started stack_watchdog pid=$!"
+}
+
 log "watchdog start interval=${INTERVAL}s hang_check=$CHECK_HANG bin=$BIN"
+ensure_stack_watchdog
 
 # ensure one serve on boot
 if ! rockctl_running || ! health_ok; then
@@ -99,8 +119,14 @@ if ! rockctl_running || ! health_ok; then
 fi
 
 fail=0
+loop_n=0
 while true; do
   sleep "$INTERVAL" || sleep 15
+  loop_n=$((loop_n + 1))
+  # Re-check stack watchdog ~ every 10 intervals (~2.5 min)
+  if [ $((loop_n % 10)) -eq 0 ]; then
+    ensure_stack_watchdog
+  fi
 
   if ! rockctl_running; then
     log "rockctl dead — restart"

@@ -904,7 +904,7 @@ static int spawn_async_act(miio_client *m, const char *kind, const char *arg) {
 }
 
 /* Status cache + single-flight background refresh (stale-while-revalidate). */
-enum { ST_TTL_S = 2, ST_STALE_S = 30 };
+enum { ST_TTL_S = 5, ST_STALE_S = 45 }; /* lean: fewer miio get_status under Dash poll */
 static pthread_mutex_t g_st_mu = PTHREAD_MUTEX_INITIALIZER;
 static char g_st_buf[6144];
 static time_t g_st_ts;
@@ -2132,7 +2132,7 @@ static void handle(int cfd, miio_client *m) {
                  "HOME=/mnt/data/rockctl "
                  "SPEAK_ENV=/mnt/data/nanobot/speak.env "
                  "SPEAK_HOME=/mnt/data/nanobot-wrapper/speak "
-                 "SPEAK_ALSA_DEVICE=clanker "
+                 "SPEAK_ALSA_DEVICE=plughw:0,0 "
                  "PATH=/mnt/data/nanobot-wrapper/speak/bin:/mnt/data/audio-bin/bin:/usr/bin:/bin "
                  "LD_LIBRARY_PATH=/mnt/data/audio-bin/lib "
                  "SAM_BIN=/mnt/data/nanobot-wrapper/speak/bin/sam "
@@ -2145,8 +2145,9 @@ static void handle(int cfd, miio_client *m) {
                  "rm -f %s",
                  volume, pitch, speed, throat, mouth, inpath, inpath);
         int rc = run_sh(cmd);
-        if (rc != 0 && is_test) {
-          char err[160];
+        /* Always surface failure — never claim played when sam_speak failed */
+        if (rc != 0) {
+          char err[200];
           snprintf(err, sizeof err,
                    "{\"ok\":false,\"error\":\"sam_speak exit %d — see "
                    "/mnt/data/nanobot-wrapper/speak/speak.log\"}",
@@ -2163,7 +2164,7 @@ static void handle(int cfd, miio_client *m) {
                  "( HOME=/mnt/data/rockctl "
                  "SPEAK_ENV=/mnt/data/nanobot/speak.env "
                  "SPEAK_HOME=/mnt/data/nanobot-wrapper/speak "
-                 "SPEAK_ALSA_DEVICE=clanker "
+                 "SPEAK_ALSA_DEVICE=plughw:0,0 "
                  "PATH=/mnt/data/nanobot-wrapper/speak/bin:/mnt/data/audio-bin/bin:/usr/bin:/bin "
                  "LD_LIBRARY_PATH=/mnt/data/audio-bin/lib "
                  "SAM_BIN=/mnt/data/nanobot-wrapper/speak/bin/sam "
@@ -3008,7 +3009,7 @@ static void handle(int cfd, miio_client *m) {
           "HOME=/mnt/data/rockctl "
           "SPEAK_ENV=/mnt/data/nanobot/speak.env "
           "SPEAK_HOME=/mnt/data/nanobot-wrapper/speak "
-          "SPEAK_ALSA_DEVICE=clanker "
+          "SPEAK_ALSA_DEVICE=plughw:0,0 "
           "PATH=/mnt/data/nanobot-wrapper/speak/bin:/mnt/data/audio-bin/bin:/usr/bin:/bin "
           "LD_LIBRARY_PATH=/mnt/data/audio-bin/lib "
           "SAM_BIN=/mnt/data/nanobot-wrapper/speak/bin/sam "
@@ -3196,11 +3197,12 @@ static void handle(int cfd, miio_client *m) {
  * Main thread: select/accept + schedule_tick (never blocked by miio/speak).
  * Workers: each request gets own miio UDP client (no shared sock races).
  */
+/* 251MB a38: 3 workers enough for Dash+API; was 6 (extra idle stacks). */
 #ifndef ROCKCTL_HTTP_THREADS
-#define ROCKCTL_HTTP_THREADS 6
+#define ROCKCTL_HTTP_THREADS 3
 #endif
 #ifndef ROCKCTL_HTTP_QMAX
-#define ROCKCTL_HTTP_QMAX 32
+#define ROCKCTL_HTTP_QMAX 16
 #endif
 
 typedef struct {
