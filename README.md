@@ -55,4 +55,4 @@ See [SECURITY.md](SECURITY.md). Never commit `device.token`, peer tokens, or mas
 
 ## License
 
-MIT — [LICENSE](LICENSE).
+**Cubechain License** — [LICENSE](LICENSE).

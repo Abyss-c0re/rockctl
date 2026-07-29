@@ -1,4 +1,6 @@
 rockctl — local Roborock miio control (CLI + HTTP)
+Copyright (c) 2026 CrimsonCube Labs LLC
+Licensed under the Cubechain License — see LICENSE.
 
 Third-party:
 
