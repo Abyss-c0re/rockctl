@@ -55,6 +55,8 @@ Lime polyline = last session; magenta = map coverage; red = issues.
 
 Schedule job fields: `id`, `enabled`, `hh`, `mm`, `dow` (e.g. `1-5`), `type` (`auto`|`spot`), `cycles` (1–3), `fan`, `water`.
 
+`POST /api/v1/clean` with `cycles` ≥ 2 uses firmware repeat: `app_segment_clean` `{repeat}` when rooms exist, else `app_zoned_clean` `[[x1,y1,x2,y2,repeat]]` over the map (no-go / walls still apply). This AppProxy has no `set_clean_count`.
+
 ### Virtual walls & no-go
 
 Coords are **miio / `app_goto_target` frame** (SLAM + 25500). Same as Summon / places.

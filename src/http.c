@@ -896,6 +896,83 @@ static int wifi_sta_up(char *ip_out, size_t n) {
   return ip_out && ip_out[0] ? 1 : 0;
 }
 
+/* Firmware 2–3 pass: AppProxy exposes repeat on app_segment_clean / app_zoned_clean. */
+static int parse_segment_ids(const char *j, int *ids, int maxn) {
+  int n = 0;
+  const char *res = strstr(j, "\"result\"");
+  const char *p = res ? res : j;
+  while (*p && n < maxn) {
+    if (*p >= '1' && *p <= '9') {
+      int v = atoi(p);
+      if (v >= 10 && v <= 63) {
+        int dup = 0;
+        for (int i = 0; i < n; i++) if (ids[i] == v) { dup = 1; break; }
+        if (!dup) ids[n++] = v;
+      }
+      while (*p >= '0' && *p <= '9') p++;
+    } else p++;
+  }
+  return n;
+}
+
+static int rrslam_goto_bounds(int *x1, int *y1, int *x2, int *y2) {
+  char *bin = NULL;
+  size_t n = 0;
+  int w = 0, h = 0, off = 0, top = 0, left = 0;
+  if (read_file_bin("/mnt/data/rockrobo/last_map", &bin, &n) != 0 || !bin)
+    return -1;
+  if (rrslam_dims(bin, n, &w, &h, &off, &top, &left) != 0) {
+    free(bin);
+    return -1;
+  }
+  free(bin);
+  *x1 = left * 50 + REST_GOTO_OFF;
+  *y1 = top * 50 + REST_GOTO_OFF;
+  *x2 = (left + w) * 50 + REST_GOTO_OFF;
+  *y2 = (top + h) * 50 + REST_GOTO_OFF;
+  if (*x1 > *x2) { int t = *x1; *x1 = *x2; *x2 = t; }
+  if (*y1 > *y2) { int t = *y1; *y1 = *y2; *y2 = t; }
+  return 0;
+}
+
+static int start_clean_firmware_cycles(miio_client *m, int cycles) {
+  char *r = NULL;
+  int ids[32];
+  int nids = 0;
+  if (cycles < 1) cycles = 1;
+  if (cycles > 3) cycles = 3;
+  if (miio_call(m, "get_room_mapping", "[]", &r) == 0 && r)
+    nids = parse_segment_ids(r, ids, 32);
+  free(r); r = NULL;
+  if (nids > 0) {
+    char params[384];
+    size_t o = 0;
+    o += (size_t)snprintf(params + o, sizeof params - o,
+                          "[{\"segments\":[");
+    for (int i = 0; i < nids && o + 8 < sizeof params; i++)
+      o += (size_t)snprintf(params + o, sizeof params - o, "%s%d", i ? "," : "", ids[i]);
+    snprintf(params + o, sizeof params - o, "],\"repeat\":%d}]", cycles);
+    if (miio_call(m, "app_segment_clean", params, &r) == 0) {
+      free(r);
+      return 0;
+    }
+    free(r); r = NULL;
+  }
+  {
+    int x1, y1, x2, y2;
+    if (rrslam_goto_bounds(&x1, &y1, &x2, &y2) == 0) {
+      char params[96];
+      snprintf(params, sizeof params, "[[%d,%d,%d,%d,%d]]", x1, y1, x2, y2, cycles);
+      if (miio_call(m, "app_zoned_clean", params, &r) == 0) {
+        free(r);
+        return 0;
+      }
+      free(r); r = NULL;
+    }
+  }
+  return miio_call(m, "app_start", "[]", &r) == 0 ? (free(r), 0) : -1;
+}
+
 /* Apply fan + water then start clean N times (miio). cycles clamped 1..3 */
 static int apply_clean_settings(miio_client *m, const char *fan, const char *water, int cycles, const char *type) {
   char *r = NULL;
@@ -918,21 +995,12 @@ static int apply_clean_settings(miio_client *m, const char *fan, const char *wat
     unlink("/mnt/data/rockctl/music_silence");
     return miio_call(m, "app_spot", "[]", &r) == 0 ? (free(r), 0) : -1;
   }
-  /* set clean count if supported, then start */
-  {
-    char p[16];
-    snprintf(p, sizeof p, "[%d]", cycles);
-    miio_call(m, "set_clean_count", p, &r); free(r); r = NULL;
-  }
   unlink("/mnt/data/rockctl/music_silence");
-  {
-    int rc = miio_call(m, "app_start", "[]", &r);
-    free(r); r = NULL;
-    /* 4.3.5 has no set_clean_count — second pass when the first returns. */
-    if (rc == 0 && cycles >= 2)
-      run_sh("/mnt/data/rockctl/bin/second_cycle.sh >>/mnt/data/rockctl/second_cycle.log 2>&1 &");
-    return rc;
-  }
+  /* Cycle count is a firmware param on zoned/segment clean (repeat),
+   * not a host watcher and not set_clean_count on this AppProxy. */
+  if (cycles <= 1)
+    return miio_call(m, "app_start", "[]", &r) == 0 ? (free(r), 0) : -1;
+  return start_clean_firmware_cycles(m, cycles);
 }
 
 /* Forward: defined with async act helpers below */
