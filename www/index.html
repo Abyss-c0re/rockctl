@@ -51,6 +51,12 @@ button:disabled{opacity:.5}
 #map-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:.25rem;vertical-align:middle}
 #map-zoom-lbl{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--mut);min-width:3.5rem}
 #map-msg{font-size:12px;color:var(--mut);margin-top:.35rem;min-height:1.2em}
+#map-edit{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.45rem;align-items:center}
+#map-edit button.on.wallon{outline-color:#ff6b6b;background:#5a1a1a;color:#ffd0d0}
+#map-edit button.on.nogoon{outline-color:#ffb020;background:#4a3208;color:#ffe7b0}
+#map-rest-list .rest-item{display:flex;gap:.4rem;align-items:center;margin:.28rem 0;flex-wrap:wrap}
+#map-rest-list .rest-item b{min-width:4.2rem}
+#map-rest-list .rest-item button{padding:.28rem .5rem;font-size:12px}
 #log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:14rem;overflow:auto;
   white-space:pre-wrap;word-break:break-word;margin-top:.45rem}
 .u{color:var(--cyan)}.a{color:var(--fg)}.s{color:var(--mut)}.err{color:var(--bad)}
@@ -178,7 +184,7 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
       <div class="card">
         <h2>Status</h2>
         <div class="kv" id="status">…</div>
-        <div class="hint">Offline via rockctl/miio. Map tab: click to summon.</div>
+        <div class="hint">Offline via rockctl/miio. Map tab: summon, virtual walls, no-go zones.</div>
       </div>
       <div class="card">
         <h2>Robot resources <span style="font-weight:400;text-transform:none;letter-spacing:0">(tight · ~256 MB)</span></h2>
@@ -200,6 +206,12 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
           <button type="button" id="map-save" disabled>Save place</button>
           <button type="button" id="map-clear" disabled>Clear</button>
           <button type="button" data-act="home">Dock</button>
+        </div>
+        <div id="map-edit">
+          <button type="button" id="map-mode-target" class="on">Target</button>
+          <button type="button" id="map-mode-wall">Virtual wall</button>
+          <button type="button" id="map-mode-nogo">No-go zone</button>
+          <button type="button" id="map-rest-undo" disabled>Undo last</button>
         </div>
         <div id="map-tools">
           <button type="button" id="map-zin" title="Zoom in">＋</button>
@@ -225,9 +237,22 @@ input[type=time],input[type=number]{width:100%;background:var(--bg);color:var(--
           <span><i style="background:#28a0ff;border-radius:2px"></i>path</span>
           <span><i style="background:#a3e635;border-radius:2px"></i>last drive</span>
           <span><i style="background:#e879f9;border-radius:2px"></i>map coverage</span>
+          <span><i style="background:#ff6b6b;border-radius:0"></i>virtual wall</span>
+          <span><i style="background:rgba(255,176,32,.55);border:1px solid #ffb020;border-radius:2px"></i>no-go</span>
         </div>
         <div id="map-msg">Loading… open this tab or press Refresh.</div>
         <div class="kv" id="map-meta" style="margin-top:.4rem"></div>
+      </div>
+      <div class="card">
+        <h2>No-go &amp; virtual walls</h2>
+        <div class="hint">Pick <b>Virtual wall</b> or <b>No-go zone</b>, tap two points on the map, then <b>Save to robot</b>. Walls are lines the robot will not cross. No-go is a box it will not enter. Drag still pans.</div>
+        <div id="map-rest-list" class="kv">No restrictions yet — draw on the map.</div>
+        <div class="row" style="margin-top:.45rem">
+          <button type="button" class="primary" id="map-rest-save">Save to robot</button>
+          <button type="button" id="map-rest-reload">Reload</button>
+          <button type="button" class="bad" id="map-rest-clear">Clear all</button>
+        </div>
+        <div class="hint" id="map-rest-msg" style="margin-top:.35rem"></div>
       </div>
       <div class="card">
         <h2>Manage maps</h2>
@@ -654,6 +679,10 @@ let mapView = { z: 1, x: 0, y: 0 }; // zoom + pan (CSS px)
 let mapDrag = null;
 let mapPinch = null;
 let mapPick = null;   // {px,py in crop space, slam, goto}
+let mapEditMode = 'target'; // target | wall | nogo
+let mapDraft = null;  // {kind, a:{px,py,slam,goto}}
+let mapRest = {walls:[], zones:[]};
+let mapRestDirty = false;
 
 function loadCfg(){ try{return JSON.parse(localStorage.getItem('clankerdash_cfg')||'{}');}catch(e){return{};} }
 function saveCfg(c){
@@ -1859,6 +1888,7 @@ function drawMap(){
     ctx.lineWidth=2;
     ctx.stroke();
   }
+  drawRestrictions(ctx);
   const zl=$('map-zoom-lbl');
   if(zl) zl.textContent = Math.round(mapView.z*100)+'%';
 }
@@ -1962,16 +1992,17 @@ async function refreshMap(){
     }catch(e){ mapPlaces=[]; }
     drawMap();
     loadDriveOverlays();
+    loadRestrictions();
     const dockPx = mapMeta.charger ? slamToPixel(mapMeta.charger.x, mapMeta.charger.y) : null;
     $('map-meta').innerHTML =
       `<div><span>slot</span> ${mapName} · <span>size</span> ${mapCrop.w}×${mapCrop.h} (full ${w}×${h})</div>`+
       (mapMeta.charger?`<div><span>dock</span> slam ${mapMeta.charger.x},${mapMeta.charger.y}`+
         (dockPx?` · view ${dockPx.px.toFixed(0)},${dockPx.py.toFixed(0)}`:'')+`</div>`:'')+
       (mapRobotPx?`<div><span>robot≈</span> path tip (conf ${mapRobotPx.conf})</div>`:'')+
-      `<div><span>tip</span> drag=pan · wheel/pinch=zoom · tap free floor → Summon</div>`;
+      `<div><span>tip</span> drag=pan · wheel/pinch=zoom · Target / Wall / No-go on the map</div>`;
     $('map-msg').textContent= mapRobotPx
-      ? 'Map ready — orange R ≈ robot · green D = dock · tap floor for target.'
-      : 'Map ready — tap free (light) floor for Summon / Spot.';
+      ? 'Map ready — orange R ≈ robot · green D = dock · Target / Wall / No-go below.'
+      : 'Map ready — Target to summon, or Virtual wall / No-go zone to draw.';
     refreshMapSlots();
   }catch(e){
     console.error(e);
@@ -2177,10 +2208,203 @@ const mapwrapEl = $('mapwrap');
 const TAP_SLOP = 14; // px — touch jitter must not cancel target place
 let mapSuppressClick = false; // true after a pan so click doesn't re-fire
 
+function gotoToSlam(g){
+  const ox=(mapMeta&&mapMeta.goto_offset_mm&&mapMeta.goto_offset_mm.x!=null)
+    ? (mapMeta.goto_offset_mm.x|0) : 25500;
+  const oy=(mapMeta&&mapMeta.goto_offset_mm&&mapMeta.goto_offset_mm.y!=null)
+    ? (mapMeta.goto_offset_mm.y|0) : 25500;
+  return { x:(g.x|0)-ox, y:(g.y|0)-oy };
+}
+function restNewId(prefix, list){
+  let n=1;
+  const ids=new Set((list||[]).map(x=>x.id));
+  while(ids.has(prefix+n)) n++;
+  return prefix+n;
+}
+function setEditMode(mode){
+  mapEditMode = mode==='wall'||mode==='nogo' ? mode : 'target';
+  mapDraft=null;
+  ['map-mode-target','map-mode-wall','map-mode-nogo'].forEach(id=>{
+    const b=$(id); if(!b) return;
+    b.classList.toggle('on', (id==='map-mode-target'&&mapEditMode==='target')||
+      (id==='map-mode-wall'&&mapEditMode==='wall')||
+      (id==='map-mode-nogo'&&mapEditMode==='nogo'));
+    b.classList.toggle('wallon', id==='map-mode-wall'&&mapEditMode==='wall');
+    b.classList.toggle('nogoon', id==='map-mode-nogo'&&mapEditMode==='nogo');
+  });
+  const sel=$('map-sel');
+  if(sel && mapEditMode!=='target'){
+    sel.textContent = mapEditMode==='wall'
+      ? 'Wall: tap start, then tap end'
+      : 'No-go: tap one corner, then the opposite';
+  } else if(sel && !mapPick){
+    sel.textContent='Tap free floor to place a target';
+  }
+  if($('map-msg')){
+    $('map-msg').textContent = mapEditMode==='target'
+      ? 'Target mode — tap floor, then Summon / Spot.'
+      : (mapEditMode==='wall'
+        ? 'Virtual wall — tap two points. Drag still pans. Save to robot when done.'
+        : 'No-go zone — tap two opposite corners. Drag still pans. Save to robot when done.');
+  }
+  drawMap();
+}
+function restMarkDirty(on){
+  mapRestDirty = !!on;
+  const u=$('map-rest-undo');
+  if(u) u.disabled = !(mapRest.walls.length||mapRest.zones.length);
+}
+function renderRestList(){
+  const box=$('map-rest-list'); if(!box) return;
+  const walls=mapRest.walls||[], zones=mapRest.zones||[];
+  if(!walls.length && !zones.length){
+    box.textContent='No restrictions yet — pick Virtual wall or No-go zone, tap two points.';
+    return;
+  }
+  let html='';
+  walls.forEach((w,i)=>{
+    html+=`<div class="rest-item"><b>wall ${esc(w.id||('w'+(i+1)))}</b>`+
+      `<span>${w.x1},${w.y1} → ${w.x2},${w.y2}</span>`+
+      `<button type="button" data-rest-del="wall:${i}">Delete</button></div>`;
+  });
+  zones.forEach((z,i)=>{
+    html+=`<div class="rest-item"><b>${esc(z.type||'nogo')} ${esc(z.id||('z'+(i+1)))}</b>`+
+      `<span>${z.x1},${z.y1} – ${z.x2},${z.y2}</span>`+
+      `<button type="button" data-rest-del="zone:${i}">Delete</button></div>`;
+  });
+  if(mapRestDirty) html+=`<div><span>unsaved</span> Save to robot to apply.</div>`;
+  box.innerHTML=html;
+  box.querySelectorAll('[data-rest-del]').forEach(b=>{
+    b.onclick=()=>{
+      const [kind, idx]=b.getAttribute('data-rest-del').split(':');
+      const i=parseInt(idx,10);
+      if(kind==='wall') mapRest.walls.splice(i,1);
+      else mapRest.zones.splice(i,1);
+      restMarkDirty(true);
+      renderRestList();
+      drawMap();
+    };
+  });
+}
+async function loadRestrictions(){
+  try{
+    const j=await rock('/api/v1/map/restrictions');
+    mapRest={
+      walls: Array.isArray(j.walls)?j.walls:[],
+      zones: Array.isArray(j.zones)?j.zones:[]
+    };
+    restMarkDirty(false);
+    renderRestList();
+    const msg=$('map-rest-msg');
+    if(msg){
+      const lab=j.lab_status||j.lab_cfg;
+      msg.textContent = (lab===0)
+        ? 'Map saving (lab) looks off — walls/no-go need it on.'
+        : `${mapRest.walls.length} wall(s), ${mapRest.zones.length} no-go(s).`;
+    }
+    drawMap();
+  }catch(e){
+    const msg=$('map-rest-msg');
+    if(msg) msg.textContent='Restrictions API missing — update rockctl on the robot.';
+  }
+}
+async function saveRestrictions(){
+  const msg=$('map-rest-msg');
+  if(msg) msg.textContent='Saving walls / no-go to robot…';
+  try{
+    const j=await rock('/api/v1/map/restrictions',{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        frame:'miio_app_goto_target',
+        walls:mapRest.walls,
+        zones:mapRest.zones
+      })
+    });
+    mapRest={
+      walls: Array.isArray(j.walls)?j.walls:mapRest.walls,
+      zones: Array.isArray(j.zones)?j.zones:mapRest.zones
+    };
+    restMarkDirty(false);
+    renderRestList();
+    if(msg) msg.textContent=`Saved — ${mapRest.walls.length} wall(s), ${mapRest.zones.length} no-go(s).`;
+    $('map-msg').textContent='Restrictions saved to robot.';
+    drawMap();
+  }catch(e){
+    if(msg) msg.textContent='Save failed: '+(e&&e.message?e.message:e);
+  }
+}
+function addRestFromDraft(a, b){
+  if(!a||!b) return;
+  if(mapEditMode==='wall'){
+    const id=restNewId('w', mapRest.walls);
+    mapRest.walls.push({id, x1:a.goto.x, y1:a.goto.y, x2:b.goto.x, y2:b.goto.y});
+    $('map-msg').textContent=`Wall ${id} added — Save to robot when the set looks right.`;
+  }else if(mapEditMode==='nogo'){
+    const id=restNewId('z', mapRest.zones);
+    const x1=Math.min(a.goto.x,b.goto.x), x2=Math.max(a.goto.x,b.goto.x);
+    const y1=Math.min(a.goto.y,b.goto.y), y2=Math.max(a.goto.y,b.goto.y);
+    if(Math.abs(x2-x1)<200 || Math.abs(y2-y1)<200){
+      $('map-msg').textContent='No-go too small — tap a wider box.';
+      return;
+    }
+    mapRest.zones.push({id, type:'nogo', x1,y1,x2,y2});
+    $('map-msg').textContent=`No-go ${id} added — Save to robot when the set looks right.`;
+  }
+  restMarkDirty(true);
+  renderRestList();
+  drawMap();
+}
+function drawRestrictions(ctx){
+  if(!mapMeta) return;
+  function line(x1,y1,x2,y2, color, width){
+    const a=slamToPixel(x1,y1), b=slamToPixel(x2,y2);
+    const sa=mapToScreen(a.px,a.py), sb=mapToScreen(b.px,b.py);
+    ctx.beginPath();
+    ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y);
+    ctx.strokeStyle=color; ctx.lineWidth=width; ctx.lineCap='round';
+    ctx.stroke();
+  }
+  function box(x1,y1,x2,y2, fill, stroke){
+    const a=slamToPixel(x1,y1), b=slamToPixel(x2,y2);
+    const sa=mapToScreen(a.px,a.py), sb=mapToScreen(b.px,b.py);
+    const x=Math.min(sa.x,sb.x), y=Math.min(sa.y,sb.y);
+    const w=Math.abs(sb.x-sa.x), h=Math.abs(sb.y-sa.y);
+    ctx.fillStyle=fill; ctx.strokeStyle=stroke; ctx.lineWidth=2;
+    ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+  }
+  (mapRest.zones||[]).forEach(z=>{
+    const a=gotoToSlam({x:z.x1,y:z.y1}), b=gotoToSlam({x:z.x2,y:z.y2});
+    box(a.x,a.y,b.x,b.y,'rgba(255,176,32,0.28)','#ffb020');
+  });
+  (mapRest.walls||[]).forEach(w=>{
+    const a=gotoToSlam({x:w.x1,y:w.y1}), b=gotoToSlam({x:w.x2,y:w.y2});
+    line(a.x,a.y,b.x,b.y,'#ff6b6b',4);
+  });
+  if(mapDraft && mapDraft.a){
+    const a=mapDraft.a;
+    const sc=mapToScreen(a.px,a.py);
+    drawDot(ctx, sc.x, sc.y, mapEditMode==='wall'?'#ff6b6b':'#ffb020', '#111', 6);
+  }
+}
+
 function placeTargetAt(clientX, clientY){
   try{
     const pick=pickAtScreen(clientX, clientY);
     if(!pick) return false;
+    if(mapEditMode==='wall' || mapEditMode==='nogo'){
+      if(!mapDraft){
+        mapDraft={kind:mapEditMode, a:pick};
+        $('map-msg').textContent = mapEditMode==='wall'
+          ? 'Wall start set — tap the other end.'
+          : 'No-go corner set — tap the opposite corner.';
+        drawMap();
+        return true;
+      }
+      addRestFromDraft(mapDraft.a, pick);
+      mapDraft=null;
+      return true;
+    }
     setPick(pick);
     $('map-msg').textContent = pick.onWall
       ? 'Target on wall/obstacle — prefer free (light) floor.'
@@ -2257,7 +2481,25 @@ if($('map-spot')) $('map-spot').onclick=()=>{
   doSpotClean(mapPick.goto);
 };
 if($('map-save')) $('map-save').onclick=()=>{ if(mapPick) savePlaceAt(mapPick.goto); };
-if($('map-clear')) $('map-clear').onclick=()=>{ clearPick(); $('map-msg').textContent='Target cleared.'; };
+if($('map-clear')) $('map-clear').onclick=()=>{ clearPick(); mapDraft=null; $('map-msg').textContent='Target cleared.'; };
+if($('map-mode-target')) $('map-mode-target').onclick=()=>setEditMode('target');
+if($('map-mode-wall')) $('map-mode-wall').onclick=()=>setEditMode('wall');
+if($('map-mode-nogo')) $('map-mode-nogo').onclick=()=>setEditMode('nogo');
+if($('map-rest-undo')) $('map-rest-undo').onclick=()=>{
+  if(mapRest.zones.length) mapRest.zones.pop();
+  else if(mapRest.walls.length) mapRest.walls.pop();
+  else return;
+  restMarkDirty(true);
+  renderRestList();
+  drawMap();
+};
+if($('map-rest-save')) $('map-rest-save').onclick=()=>saveRestrictions();
+if($('map-rest-reload')) $('map-rest-reload').onclick=()=>loadRestrictions();
+if($('map-rest-clear')) $('map-rest-clear').onclick=async()=>{
+  if(!confirm('Clear all virtual walls and no-go zones on the robot?')) return;
+  mapRest={walls:[], zones:[]};
+  await saveRestrictions();
+};
 
 // pinch zoom
 mapwrapEl.addEventListener('touchstart', (ev)=>{

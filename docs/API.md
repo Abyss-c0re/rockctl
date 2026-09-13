@@ -36,6 +36,9 @@ Base URL: `http://<robot>:8080`
 | GET | `/api/v1/drive/last` | — | Last drive path JSON (ClankerDash coverage + lab export) |
 | PUT | `/api/v1/drive/last` | session JSON | Save last drive path (`/mnt/data/rockctl/drive/last.json`) |
 | GET | `/api/v1/drive/coverage` | — | RRSLAM path-layer cells (last clean coverage sample) |
+| GET | `/api/v1/map/restrictions` | — | Virtual walls + no-go (`restrictions.json` + lab flag) |
+| PUT | `/api/v1/map/restrictions` | `{"walls":[…],"zones":[…]}` | Draw/save via miio `save_map` (lab maps must be on) |
+| DELETE | `/api/v1/map/restrictions` | — | Clear all walls and no-go zones |
 
 ### Last drive path (Dash + LHLAM)
 
@@ -50,6 +53,28 @@ ClankerDash Map tab: **Path** reloads overlays; **Drive JSON** downloads export.
 Lime polyline = last session; magenta = map coverage; red = issues.
 
 Schedule job fields: `id`, `enabled`, `hh`, `mm`, `dow` (e.g. `1-5`), `type` (`auto`|`spot`), `cycles` (1–3), `fan`, `water`.
+
+### Virtual walls & no-go
+
+Coords are **miio / `app_goto_target` frame** (SLAM + 25500). Same as Summon / places.
+
+```bash
+# list
+curl -s http://$CLANKER_HOST:8080/api/v1/map/restrictions | jq .
+
+# one virtual wall (line) + one no-go box, then push to firmware
+curl -s -X PUT http://$CLANKER_HOST:8080/api/v1/map/restrictions \
+  -H 'Content-Type: application/json' \
+  -d '{"walls":[{"id":"w1","x1":26000,"y1":27000,"x2":28000,"y2":27000}],
+       "zones":[{"id":"z1","type":"nogo","x1":27000,"y1":30000,"x2":29000,"y2":32000}]}'
+
+# clear
+curl -s -X DELETE http://$CLANKER_HOST:8080/api/v1/map/restrictions
+```
+
+- Wall: two endpoints. Zone: axis-aligned box (`x1,y1`–`x2,y2`). Optional `type` `nogo` (default) or `nomop`.
+- Limits: 10 walls, 10 zones, 68 vertices (firmware). Requires `lab_status=1` (map saving).
+- ClankerDash Map tab: **Virtual wall** / **No-go zone** → tap two points → **Save to robot**.
 | GET | `/openapi.yaml` | — | OpenAPI 3 document |
 | GET | `/` | — | Short text index |
 

@@ -216,6 +216,216 @@ static int rrslam_dims(const char *bin, size_t n, int *w, int *h, int *off,
   return 0;
 }
 
+static const char *json_str(const char *j, const char *key, char *out, size_t outsz);
+static int json_int(const char *j, const char *key, int *out);
+
+/* Virtual walls + no-go (miio save_map). Coords are app_goto_target / miio frame. */
+#define REST_MAX_WALLS 10
+#define REST_MAX_ZONES 10
+#define REST_JSON_PATH "/mnt/data/rockctl/restrictions.json"
+#define REST_GOTO_OFF 25500
+
+typedef struct {
+  char id[24];
+  int x1, y1, x2, y2;
+} rest_wall;
+
+typedef struct {
+  char id[24];
+  char type[12]; /* nogo | nomop */
+  int x1, y1, x2, y2;
+} rest_zone;
+
+typedef struct {
+  rest_wall walls[REST_MAX_WALLS];
+  int nwalls;
+  rest_zone zones[REST_MAX_ZONES];
+  int nzones;
+} rest_set;
+
+static const char *rest_next_obj(const char *s, char *out, size_t n) {
+  const char *a = strchr(s, '{');
+  if (!a) return NULL;
+  int depth = 0;
+  const char *p = a;
+  for (; *p; p++) {
+    if (*p == '{') depth++;
+    else if (*p == '}') {
+      depth--;
+      if (depth == 0) {
+        size_t len = (size_t)(p - a + 1);
+        if (len >= n) len = n - 1;
+        memcpy(out, a, len);
+        out[len] = 0;
+        return p + 1;
+      }
+    }
+  }
+  return NULL;
+}
+
+static const char *rest_array(const char *j, const char *key) {
+  char pat[40];
+  snprintf(pat, sizeof pat, "\"%s\"", key);
+  const char *p = strstr(j, pat);
+  if (!p) return NULL;
+  return strchr(p, '[');
+}
+
+static void rest_clamp_xy(int *v) {
+  if (*v < 0) *v = 0;
+  if (*v > 51200) *v = 51200;
+}
+
+static void rest_parse(const char *j, rest_set *rs, int slam_frame) {
+  memset(rs, 0, sizeof *rs);
+  if (!j || !j[0]) return;
+  char obj[256];
+  const char *p = rest_array(j, "walls");
+  if (p) {
+    p++;
+    while (rs->nwalls < REST_MAX_WALLS && (p = rest_next_obj(p, obj, sizeof obj))) {
+      rest_wall *w = &rs->walls[rs->nwalls];
+      if (!json_int(obj, "x1", &w->x1) || !json_int(obj, "y1", &w->y1) ||
+          !json_int(obj, "x2", &w->x2) || !json_int(obj, "y2", &w->y2))
+        continue;
+      if (!json_str(obj, "id", w->id, sizeof w->id) || !w->id[0])
+        snprintf(w->id, sizeof w->id, "w%d", rs->nwalls + 1);
+      if (slam_frame) {
+        w->x1 += REST_GOTO_OFF; w->y1 += REST_GOTO_OFF;
+        w->x2 += REST_GOTO_OFF; w->y2 += REST_GOTO_OFF;
+      }
+      rest_clamp_xy(&w->x1); rest_clamp_xy(&w->y1);
+      rest_clamp_xy(&w->x2); rest_clamp_xy(&w->y2);
+      rs->nwalls++;
+    }
+  }
+  p = rest_array(j, "zones");
+  if (p) {
+    p++;
+    while (rs->nzones < REST_MAX_ZONES && (p = rest_next_obj(p, obj, sizeof obj))) {
+      rest_zone *z = &rs->zones[rs->nzones];
+      if (!json_int(obj, "x1", &z->x1) || !json_int(obj, "y1", &z->y1) ||
+          !json_int(obj, "x2", &z->x2) || !json_int(obj, "y2", &z->y2))
+        continue;
+      if (!json_str(obj, "id", z->id, sizeof z->id) || !z->id[0])
+        snprintf(z->id, sizeof z->id, "z%d", rs->nzones + 1);
+      if (!json_str(obj, "type", z->type, sizeof z->type) || !z->type[0])
+        snprintf(z->type, sizeof z->type, "nogo");
+      if (strcmp(z->type, "nomop") != 0) snprintf(z->type, sizeof z->type, "nogo");
+      if (slam_frame) {
+        z->x1 += REST_GOTO_OFF; z->y1 += REST_GOTO_OFF;
+        z->x2 += REST_GOTO_OFF; z->y2 += REST_GOTO_OFF;
+      }
+      rest_clamp_xy(&z->x1); rest_clamp_xy(&z->y1);
+      rest_clamp_xy(&z->x2); rest_clamp_xy(&z->y2);
+      if (z->x1 > z->x2) { int t = z->x1; z->x1 = z->x2; z->x2 = t; }
+      if (z->y1 > z->y2) { int t = z->y1; z->y1 = z->y2; z->y2 = t; }
+      rs->nzones++;
+    }
+  }
+}
+
+static int rest_vertices(const rest_set *rs) {
+  return rs->nwalls * 2 + rs->nzones * 4;
+}
+
+static void rest_to_json(const rest_set *rs, char *out, size_t n) {
+  size_t o = 0;
+  o += (size_t)snprintf(out + o, n - o,
+    "{\"ok\":true,\"frame\":\"miio_app_goto_target\","
+    "\"goto_offset_mm\":{\"x\":%d,\"y\":%d},"
+    "\"limits\":{\"walls\":%d,\"zones\":%d,\"vertices\":68},"
+    "\"walls\":[",
+    REST_GOTO_OFF, REST_GOTO_OFF, REST_MAX_WALLS, REST_MAX_ZONES);
+  for (int i = 0; i < rs->nwalls && o + 80 < n; i++) {
+    const rest_wall *w = &rs->walls[i];
+    o += (size_t)snprintf(out + o, n - o,
+      "%s{\"id\":\"%s\",\"x1\":%d,\"y1\":%d,\"x2\":%d,\"y2\":%d}",
+      i ? "," : "", w->id, w->x1, w->y1, w->x2, w->y2);
+  }
+  o += (size_t)snprintf(out + o, n - o, "],\"zones\":[");
+  for (int i = 0; i < rs->nzones && o + 96 < n; i++) {
+    const rest_zone *z = &rs->zones[i];
+    o += (size_t)snprintf(out + o, n - o,
+      "%s{\"id\":\"%s\",\"type\":\"%s\",\"x1\":%d,\"y1\":%d,\"x2\":%d,\"y2\":%d}",
+      i ? "," : "", z->id, z->type, z->x1, z->y1, z->x2, z->y2);
+  }
+  snprintf(out + o, n - o, "]}");
+}
+
+static int rest_save_map_params(const rest_set *rs, char *out, size_t n) {
+  size_t o = 0;
+  int first = 1;
+  o += (size_t)snprintf(out + o, n - o, "[");
+  for (int i = 0; i < rs->nwalls; i++) {
+    const rest_wall *w = &rs->walls[i];
+    int m = snprintf(out + o, n - o, "%s[1,%d,%d,%d,%d]",
+                     first ? "" : ",", w->x1, w->y1, w->x2, w->y2);
+    if (m < 0 || (size_t)m >= n - o) return -1;
+    o += (size_t)m;
+    first = 0;
+  }
+  for (int i = 0; i < rs->nzones; i++) {
+    const rest_zone *z = &rs->zones[i];
+    int typ = (strcmp(z->type, "nomop") == 0) ? 2 : 0;
+    int m = snprintf(out + o, n - o,
+      "%s[%d,%d,%d,%d,%d,%d,%d,%d,%d]",
+      first ? "" : ",", typ,
+      z->x1, z->y1, z->x2, z->y1, z->x2, z->y2, z->x1, z->y2);
+    if (m < 0 || (size_t)m >= n - o) return -1;
+    o += (size_t)m;
+    first = 0;
+  }
+  if (o + 2 >= n) return -1;
+  out[o++] = ']';
+  out[o] = 0;
+  return 0;
+}
+
+static int rest_is_path(const char *path) {
+  return !strcmp(path, "/api/v1/map/restrictions") ||
+         !strcmp(path, "/api/v1/maps/restrictions");
+}
+
+static int rest_load_file(rest_set *rs) {
+  char *bin = NULL;
+  size_t n = 0;
+  memset(rs, 0, sizeof *rs);
+  if (read_file_bin(REST_JSON_PATH, &bin, &n) != 0 || !bin) return 0;
+  rest_parse(bin, rs, 0);
+  free(bin);
+  return 1;
+}
+
+static int rest_apply(miio_client *m, const rest_set *rs, char *err, size_t errn) {
+  if (rest_vertices(rs) > 68) {
+    snprintf(err, errn, "too many vertices (max 68)");
+    return -1;
+  }
+  char *tmp = NULL;
+  miio_call(m, "set_lab_status", "[1]", &tmp);
+  free(tmp);
+  tmp = NULL;
+  char params[2048];
+  if (rest_save_map_params(rs, params, sizeof params) != 0) {
+    snprintf(err, errn, "payload too large");
+    return -1;
+  }
+  char *r = NULL;
+  if (miio_call(m, "save_map", params, &r) != 0) {
+    snprintf(err, errn, "save_map failed");
+    free(r);
+    return -1;
+  }
+  if (r && strstr(r, "unknown_method")) {
+    snprintf(err, errn, "save_map unknown_method (firmware)");
+    free(r);
+    return -1;
+  }
+  free(r);
+  return 0;
+}
 
 /* 3D export offloaded to BlackCube/Groot browser or map_3d_worker.py */
 
@@ -996,7 +1206,7 @@ static void handle(int cfd, miio_client *m) {
 
   if (is_get && !strcmp(path,"/api/v1/health")) {
     resp(cfd,200,"application/json",
-         "{\"ok\":true,\"service\":\"rockctl\",\"version\":\"0.1.2-nb\"}");
+         "{\"ok\":true,\"service\":\"rockctl\",\"version\":\"0.1.3-nb\"}");
   } else if (is_get && !strcmp(path,"/api/v1/status")) {
     /* Non-blocking SWR: always answer from cache when possible; refresh in bg. */
     time_t now = time(NULL);
@@ -1370,6 +1580,56 @@ static void handle(int cfd, miio_client *m) {
           resp_bin(cfd, 200, "application/octet-stream", fname, bin, bl);
           free(bin);
         }
+      }
+    }
+
+  } else if (is_get && rest_is_path(path)) {
+    rest_set rs;
+    rest_load_file(&rs);
+    char body[4096];
+    rest_to_json(&rs, body, sizeof body);
+    /* splice lab.cfg into the JSON object */
+    char lab[8];
+    read_small("/mnt/data/rockrobo/lab.cfg", lab, sizeof lab, "0");
+    char out[4352];
+    size_t bl = strlen(body);
+    if (bl > 2 && body[bl - 1] == '}') {
+      body[bl - 1] = 0;
+      snprintf(out, sizeof out, "%s,\"lab_cfg\":%d,\"lab_status\":%d}",
+               body, lab[0] == '1' ? 1 : 0, lab[0] == '1' ? 1 : 0);
+      resp(cfd, 200, "application/json", out);
+    } else {
+      resp(cfd, 200, "application/json", body);
+    }
+
+  } else if ((is_post || is_put || is_del) && rest_is_path(path)) {
+    rest_set rs;
+    memset(&rs, 0, sizeof rs);
+    if (!is_del) {
+      char *body = strstr(req, "\r\n\r\n");
+      body = body ? body + 4 : "";
+      int slam = 0;
+      char frame[32] = {0};
+      if (json_str(body, "frame", frame, sizeof frame) &&
+          (!strcmp(frame, "slam") || !strcmp(frame, "slam_mm")))
+        slam = 1;
+      rest_parse(body, &rs, slam);
+    }
+    if (rest_vertices(&rs) > 68) {
+      resp(cfd, 400, "application/json",
+           "{\"error\":\"too many vertices (max 68)\"}");
+    } else {
+      char err[96] = {0};
+      if (rest_apply(m, &rs, err, sizeof err) != 0) {
+        char eout[192];
+        snprintf(eout, sizeof eout, "{\"error\":\"%s\"}", err[0] ? err : "save failed");
+        resp(cfd, 502, "application/json", eout);
+      } else {
+        char store[4096];
+        rest_to_json(&rs, store, sizeof store);
+        mkdir("/mnt/data/rockctl", 0755);
+        write_small(REST_JSON_PATH, store);
+        resp(cfd, 200, "application/json", store);
       }
     }
 
@@ -3185,6 +3445,7 @@ static void handle(int cfd, miio_client *m) {
       "  POST /api/v1/control {action}  (async 202 default; sync:true to wait)\n"
       "  POST /api/v1/manual/async {action}  (always non-blocking)\n"
       "  PUT  /api/v1/fan|water  (async 202 default)\n"
+      "  GET|PUT|DELETE /api/v1/map/restrictions  (virtual walls + no-go)\n"
       "  POST /api/v1/system {restart_stack|reboot}\n");
   } else {
     resp(cfd,404,"text/plain","not found\n");
