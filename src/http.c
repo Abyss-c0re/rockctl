@@ -925,7 +925,14 @@ static int apply_clean_settings(miio_client *m, const char *fan, const char *wat
     miio_call(m, "set_clean_count", p, &r); free(r); r = NULL;
   }
   unlink("/mnt/data/rockctl/music_silence");
-  return miio_call(m, "app_start", "[]", &r) == 0 ? (free(r), 0) : -1;
+  {
+    int rc = miio_call(m, "app_start", "[]", &r);
+    free(r); r = NULL;
+    /* 4.3.5 has no set_clean_count — second pass when the first returns. */
+    if (rc == 0 && cycles >= 2)
+      run_sh("/mnt/data/rockctl/bin/second_cycle.sh >>/mnt/data/rockctl/second_cycle.log 2>&1 &");
+    return rc;
+  }
 }
 
 /* Forward: defined with async act helpers below */
