@@ -23,3 +23,22 @@ pcm.clanker_quiet {
     ttable.0.0 0.6
     ttable.1.1 0.6
 }
+# 66% linear — default clean-music level
+pcm.clanker_66 {
+    type route
+    slave.pcm "clanker"
+    ttable.0.0 0.66
+    ttable.1.1 0.66
+}
+pcm.clanker_whisper {
+    type route
+    slave.pcm "clanker"
+    ttable.0.0 0.12
+    ttable.1.1 0.12
+}
+pcm.clanker_boost {
+    type route
+    slave.pcm "clanker"
+    ttable.0.0 4.0
+    ttable.1.1 4.0
+}

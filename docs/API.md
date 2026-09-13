@@ -28,6 +28,7 @@ Base URL: `http://<robot>:8080`
 | POST | `/api/v1/manual` | `{"action":"start\|stop\|forward\|back\|left\|right\|halt\|move",…}` | Remote control (no clean); add `"async":true` for non-blocking |
 | POST | `/api/v1/manual/async` | same body | Always **202** + detached miio (client never waits on UDP) |
 | PUT | `/api/v1/fan` | `{"level":"quiet\|balanced\|turbo\|max"}` | Fan / suction preset |
+| PUT | `/api/v1/music` | `{"mode":"clean\|on\|off","volume":0-100}` | Clean-music; volume 66 default. Dock/return always stops playback |
 | PUT | `/api/v1/water` | `{"level":"off\|low\|medium\|high"}` | Mop moisture (water box) |
 | GET | `/api/v1/schedule` | — | Cleaning jobs (`/mnt/data/rockctl/schedule.json`) |
 | PUT | `/api/v1/schedule` | `{"ok":true,"jobs":[…]}` or one job | Persist schedule (survives reboot) |

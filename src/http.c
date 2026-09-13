@@ -519,6 +519,8 @@ static void write_small(const char *path, const char *s) {
   fclose(f);
 }
 
+static void music_stop_now(void);
+
 static void read_small(const char *path, char *out, size_t n, const char *def) {
   out[0] = 0;
   FILE *f = fopen(path, "r");
@@ -642,13 +644,18 @@ static int json_int(const char *j, const char *key, int *out) {
 
 static int do_action(miio_client *m, const char *action, char **out) {
   const char *method = NULL;
-  if (!strcmp(action,"start")) method="app_start";
+  if (!strcmp(action,"start")) {
+    unlink("/mnt/data/rockctl/music_silence");
+    method="app_start";
+  }
   else if (!strcmp(action,"stop")) method="app_stop";
   else if (!strcmp(action,"pause")) method="app_pause";
   else if (!strcmp(action,"home")||!strcmp(action,"dock")||!strcmp(action,"charge")) {
     /* Home often no-ops while app_rc_* / manual is engaged. Drop RC first,
      * pause any active clean, then app_charge. Failures on pre-steps are OK. */
     char *tmp = NULL;
+    music_stop_now();
+    write_small("/mnt/data/rockctl/music_silence", "1");
     miio_call(m, "app_rc_end", "[]", &tmp);
     free(tmp);
     tmp = NULL;
@@ -908,6 +915,7 @@ static int apply_clean_settings(miio_client *m, const char *fan, const char *wat
   if (cycles > 3) cycles = 3;
   /* type: auto|spot — spot uses app_spot once */
   if (type && !strcmp(type, "spot")) {
+    unlink("/mnt/data/rockctl/music_silence");
     return miio_call(m, "app_spot", "[]", &r) == 0 ? (free(r), 0) : -1;
   }
   /* set clean count if supported, then start */
@@ -916,6 +924,7 @@ static int apply_clean_settings(miio_client *m, const char *fan, const char *wat
     snprintf(p, sizeof p, "[%d]", cycles);
     miio_call(m, "set_clean_count", p, &r); free(r); r = NULL;
   }
+  unlink("/mnt/data/rockctl/music_silence");
   return miio_call(m, "app_start", "[]", &r) == 0 ? (free(r), 0) : -1;
 }
 
@@ -1124,6 +1133,53 @@ static char g_st_host[64];
 static int g_st_port;
 static char g_st_token[160];
 
+/* Kill only the music aplay pid — never killall aplay (SAM TTS). */
+static void music_stop_now(void) {
+  FILE *pf = fopen("/mnt/data/clean_music_aplay.pid", "r");
+  int pid = 0;
+  if (pf) {
+    if (fscanf(pf, "%d", &pid) != 1) pid = 0;
+    fclose(pf);
+  }
+  if (pid > 1) {
+    kill(pid, SIGTERM);
+    kill(pid, SIGKILL);
+  }
+  unlink("/mnt/data/clean_music_aplay.pid");
+}
+
+static int json_key_int_first(const char *j, const char *key, int *out) {
+  char pat[48];
+  const char *p;
+  if (!j || !key || !out) return 0;
+  snprintf(pat, sizeof pat, "\"%s\"", key);
+  p = strstr(j, pat);
+  if (!p) return 0;
+  p = strchr(p + strlen(pat), ':');
+  if (!p) return 0;
+  p++;
+  while (*p == ' ' || *p == '\t') p++;
+  if (!(*p == '-' || (*p >= '0' && *p <= '9'))) return 0;
+  *out = atoi(p);
+  return 1;
+}
+
+/* Dock/return must silence music even if the loop's status poll is stale. */
+static void music_sync_dock_silence(const char *json) {
+  int st = -1, ret = 0;
+  int silence;
+  if (!json) return;
+  json_key_int_first(json, "state", &st);
+  json_key_int_first(json, "in_returning", &ret);
+  silence = (ret == 1) || (st == 6) || (st == 8) || (st == 15);
+  if (silence) {
+    music_stop_now();
+    write_small("/mnt/data/rockctl/music_silence", "1");
+  } else if (st == 5 || st == 11 || st == 17 || st == 18) {
+    unlink("/mnt/data/rockctl/music_silence");
+  }
+}
+
 static void status_cache_store(const char *json) {
   size_t n;
   if (!json || !json[0]) return;
@@ -1135,6 +1191,7 @@ static void status_cache_store(const char *json) {
   g_st_ts = time(NULL);
   g_st_have = 1;
   pthread_mutex_unlock(&g_st_mu);
+  music_sync_dock_silence(json);
 }
 
 static void *status_bg_refresh(void *arg) {
@@ -1206,7 +1263,7 @@ static void handle(int cfd, miio_client *m) {
 
   if (is_get && !strcmp(path,"/api/v1/health")) {
     resp(cfd,200,"application/json",
-         "{\"ok\":true,\"service\":\"rockctl\",\"version\":\"0.1.3-nb\"}");
+         "{\"ok\":true,\"service\":\"rockctl\",\"version\":\"0.1.4-nb\"}");
   } else if (is_get && !strcmp(path,"/api/v1/status")) {
     /* Non-blocking SWR: always answer from cache when possible; refresh in bg. */
     time_t now = time(NULL);
@@ -1640,6 +1697,12 @@ static void handle(int cfd, miio_client *m) {
     read_small("/mnt/data/rockctl/music_mode", mode, sizeof mode, "clean");
     read_small("/mnt/data/rockctl/play_mode", pmode, sizeof pmode, "loop");
     read_small("/mnt/data/rockctl/current", cur, sizeof cur, "");
+    char volbuf[16];
+    int mvol = 66;
+    read_small("/mnt/data/rockctl/music_volume", volbuf, sizeof volbuf, "66");
+    if (volbuf[0]) mvol = atoi(volbuf);
+    if (mvol < 0) mvol = 0;
+    if (mvol > 100) mvol = 100;
     int playing = 0;
     FILE *pf = fopen("/mnt/data/clean_music_aplay.pid", "r");
     if (pf) {
@@ -1686,11 +1749,11 @@ static void handle(int cfd, miio_client *m) {
     char body[3072];
     snprintf(body, sizeof body,
       "{\"ok\":true,\"mode\":\"%s\",\"play_mode\":\"%s\",\"playing\":%s,"
-      "\"current\":\"%s\",\"tracks\":%s,"
+      "\"current\":\"%s\",\"volume\":%d,\"tracks\":%s,"
       "\"dir\":\"/mnt/data/rockctl/music\","
       "\"limits\":{\"max_upload_bytes\":%d,\"formats\":[\"wav\"]}}",
       mode[0]?mode:"clean", pmode[0]?pmode:"loop", playing?"true":"false",
-      cur, tracks, ROCK_HTTP_MAX_BODY);
+      cur, mvol, tracks, ROCK_HTTP_MAX_BODY);
     resp(cfd,200,"application/json",body);
 
   } else if ((is_post||is_put) && !strcmp(path,"/api/v1/music")) {
@@ -1703,6 +1766,16 @@ static void handle(int cfd, miio_client *m) {
       json_str(body,"playback",pmode,sizeof pmode);
     json_str(body,"action",act,sizeof act);
     json_str(body,"track",track,sizeof track);
+    {
+      int vol = -1;
+      if (json_int(body, "volume", &vol) || json_int(body, "vol", &vol)) {
+        if (vol < 0) vol = 0;
+        if (vol > 100) vol = 100;
+        char vb[16];
+        snprintf(vb, sizeof vb, "%d", vol);
+        write_small("/mnt/data/rockctl/music_volume", vb);
+      }
+    }
     /* action aliases */
     if (!mode[0] && act[0]) {
       if (!strcmp(act,"play")||!strcmp(act,"on")) strcpy(mode,"on");

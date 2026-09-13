@@ -148,16 +148,30 @@ resolve_current() {
   [ -n "$t" ]
 }
 
+SILENCE_FLAG="${ROOT}/music_silence"
+
 get_state() {
   body=$(wget -q -O - -T 3 "$STATUS_URL" 2>/dev/null) || body=""
   [ -n "$body" ] || { echo ""; return 1; }
   inc=$(echo "$body" | sed -n 's/.*"in_cleaning"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)
+  ret=$(echo "$body" | sed -n 's/.*"in_returning"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)
   st=$(echo "$body" | sed -n 's/.*"state"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)
   if [ -n "$st" ]; then
-    echo "$st:$inc"
+    echo "$st:${inc:-0}:${ret:-0}"
     return 0
   fi
   echo ""
+  return 1
+}
+
+# Dock / return / charge — music must be silent (even if music_mode=on).
+is_home_silence() {
+  st="$1"; ret="$3"
+  [ "$ret" = "1" ] && return 0
+  [ -f "$SILENCE_FLAG" ] && return 0
+  case "$st" in
+    6|8|15) return 0 ;;  # returning / docked / docking
+  esac
   return 1
 }
 
@@ -165,7 +179,8 @@ get_state() {
 # Pause (10) keeps in_cleaning=1 on many firmwares — do NOT treat as active.
 # Returning/docking/charging/idle must stop music.
 is_cleaning_state() {
-  st="$1"; inc="$2"
+  st="$1"; inc="$2"; ret="$3"
+  is_home_silence "$st" "$inc" "$ret" && return 1
   case "$st" in
     10|6|8|3|15|2|9|12|22|1|7|16) return 1 ;;  # pause/return/charge/idle/dock/manual/goto…
   esac
@@ -184,14 +199,21 @@ speak_busy() {
 }
 
 stop_aplay() {
-  # Only stop *our* music aplay. Never mass-kill all aplay — that cut off SAM TTS.
-  if speak_busy; then
-    return 0
-  fi
+  # Always stop *our* music aplay — including while SAM is talking.
+  # Skipping stop on speak_busy left music running after dock.
+  # Never mass-kill all aplay (that cuts off SAM TTS).
   if [ -f "$APLAY_PIDFILE" ]; then
     ap=$(cat "$APLAY_PIDFILE" 2>/dev/null)
-    [ -n "$ap" ] && kill "$ap" 2>/dev/null
-    [ -n "$ap" ] && kill -9 "$ap" 2>/dev/null
+    if [ -n "$ap" ]; then
+      kill "$ap" 2>/dev/null
+      # child helper if aplay forked
+      for c in /proc/[0-9]*; do
+        pid=${c#/proc/}
+        pp=$(awk '/^PPid:/{print $2; exit}' "$c/status" 2>/dev/null) || continue
+        [ "$pp" = "$ap" ] && kill "$pid" 2>/dev/null
+      done
+      kill -9 "$ap" 2>/dev/null
+    fi
     rm -f "$APLAY_PIDFILE"
   fi
 }
@@ -203,19 +225,27 @@ aplay_alive() {
   kill -0 "$ap" 2>/dev/null
 }
 
-# ALSA device: prefer quiet mix (~60% gain / ~40% quieter) so OUCH/TTS overlay.
+# ALSA device: volume file 0–100 maps to named mix (default 66).
 # Override with CLEAN_MUSIC_PCM (e.g. clanker for full volume).
 music_aplay_dev() {
   if [ -n "${CLEAN_MUSIC_PCM:-}" ]; then
     echo "$CLEAN_MUSIC_PCM"
     return
   fi
-  # $HOME/.asoundrc (HOME=$ROOT) defines clanker_quiet → clanker → dmix
-  if [ -f "$ROOT/.asoundrc" ] || [ -f "$ROOT/asound.rc" ]; then
-    echo clanker_quiet
+  if [ ! -f "$ROOT/.asoundrc" ] && [ ! -f "$ROOT/asound.rc" ]; then
+    echo hw:0,0
     return
   fi
-  echo hw:0,0
+  v=$(cat "$ROOT/music_volume" 2>/dev/null | tr -d ' \t\r\n')
+  [ -n "$v" ] || v=66
+  case "$v" in
+    ''|*[!0-9]*) v=66 ;;
+  esac
+  if [ "$v" -le 20 ]; then echo clanker_whisper
+  elif [ "$v" -le 50 ]; then echo clanker_quiet
+  elif [ "$v" -le 80 ]; then echo clanker_66
+  else echo clanker
+  fi
 }
 
 start_aplay_file() {
@@ -349,7 +379,47 @@ while true; do
     continue
   fi
 
+  # Dock/return silence wins over on/clean. rockctl also writes music_silence.
+  if [ -f "$SILENCE_FLAG" ]; then
+    if [ "$want_music" = "1" ] || aplay_alive; then
+      log "dock silence flag — stop music"
+      stop_aplay
+    fi
+    want_music=0
+    was_playing=0
+    prev_want=0
+    sleep "$POLL_IDLE"
+    continue
+  fi
+
+  raw=$(get_state) || raw=""
+  st=""; inc=""; ret=""
+  if [ -n "$raw" ]; then
+    empty_streak=0
+    st=$(echo "$raw" | cut -d: -f1)
+    inc=$(echo "$raw" | cut -d: -f2)
+    ret=$(echo "$raw" | cut -d: -f3)
+    if [ "$st" != "$last_st" ]; then
+      log "state=$st in_cleaning=${inc:-?} in_returning=${ret:-?}"
+      last_st=$st
+    fi
+  else
+    empty_streak=$((empty_streak + 1))
+  fi
+
   if [ "$mode" = "on" ]; then
+    if is_home_silence "$st" "$inc" "$ret"; then
+      if [ "$want_music" = "1" ] || aplay_alive; then
+        log "docked/returning (state=${st:-?} ret=${ret:-?}) — stop music"
+        stop_aplay
+      fi
+      want_music=0
+      was_playing=0
+      prev_want=0
+      rm -f "$ONCE_DONE_FLAG"
+      sleep "$POLL_IDLE"
+      continue
+    fi
     want_music=1
     if [ "$prev_want" = "0" ]; then rm -f "$ONCE_DONE_FLAG"; was_playing=0; fi
     ensure_playing || true
@@ -359,9 +429,7 @@ while true; do
   fi
 
   # clean mode
-  raw=$(get_state) || raw=""
   if [ -z "$raw" ]; then
-    empty_streak=$((empty_streak + 1))
     if [ "$empty_streak" -ge "$EMPTY_TOLERANCE" ] && [ "$want_music" = "1" ]; then
       log "status empty — stop"
       stop_aplay
@@ -371,12 +439,8 @@ while true; do
     sleep "$POLL_IDLE"
     continue
   fi
-  empty_streak=0
-  st=$(echo "$raw" | cut -d: -f1)
-  inc=$(echo "$raw" | cut -d: -f2)
-  if [ "$st" != "$last_st" ]; then log "state=$st in_cleaning=${inc:-?}"; last_st=$st; fi
 
-  if is_cleaning_state "$st" "$inc"; then
+  if is_cleaning_state "$st" "$inc" "$ret"; then
     want_music=1
     if [ "$prev_want" = "0" ]; then rm -f "$ONCE_DONE_FLAG"; was_playing=0; fi
     ensure_playing || true
@@ -387,8 +451,9 @@ while true; do
       case "$st" in
         10) log "paused — stop music" ;;
         6)  log "returning — stop music" ;;
+        8)  log "docked — stop music" ;;
         15) log "docking — stop music" ;;
-        *)  log "not cleaning (state=$st) — stop music" ;;
+        *)  log "not cleaning (state=$st ret=${ret:-0}) — stop music" ;;
       esac
       stop_aplay
     fi
